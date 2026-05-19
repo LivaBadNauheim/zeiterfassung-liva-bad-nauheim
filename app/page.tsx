@@ -355,6 +355,11 @@ function TimeEntryTable({
   const weekStart = formatDate(weekDays[0])
   const weekEnd = formatDate(weekDays[6])
 
+  function jumpToDate(dateValue: string) {
+    if (!dateValue) return
+    setCurrentWeek(getMonday(new Date(`${dateValue}T12:00:00`)))
+  }
+
   function getEntryForDate(date: string) {
     return entries.find((entry) => entry.work_date === date) || getEmptyEntry(userId, date)
   }
@@ -369,7 +374,17 @@ function TimeEntryTable({
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium">
+            <span>📅</span>
+            <input
+              type="date"
+              onChange={(e) => jumpToDate(e.target.value)}
+              className="bg-transparent outline-none"
+              title="Datum auswählen"
+            />
+          </label>
+
           <button
             onClick={() => setCurrentWeek(addDays(currentWeek, -7))}
             className="rounded-lg border px-4 py-2"
@@ -1008,9 +1023,30 @@ export default function Home() {
       .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
   }, [profile, allEntriesUntilToday])
 
-  const adminTotalUntilToday = useMemo(() => {
-    return allEntriesUntilToday.reduce((sum, entry) => sum + calculateMinutes(entry), 0)
+  const adminTotalCurrentMonth = useMemo(() => {
+    const { start } = getMonthRangeFromDate(new Date())
+    const today = todayDateString()
+
+    return allEntriesUntilToday
+      .filter((entry) => entry.work_date >= start && entry.work_date <= today)
+      .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
   }, [allEntriesUntilToday])
+
+  const selectedAdminCurrentMonthMinutes = useMemo(() => {
+    if (!adminSelectedUserId) return 0
+
+    const { start } = getMonthRangeFromDate(new Date())
+    const today = todayDateString()
+
+    return allEntriesUntilToday
+      .filter(
+        (entry) =>
+          entry.user_id === adminSelectedUserId &&
+          entry.work_date >= start &&
+          entry.work_date <= today
+      )
+      .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
+  }, [adminSelectedUserId, allEntriesUntilToday])
 
   const adminTopThree = useMemo(() => {
     return profiles
@@ -1172,7 +1208,7 @@ export default function Home() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
-                <StatCard title="Gesamtstunden alle Mitarbeiter" value={formatHours(adminTotalUntilToday)} />
+                <StatCard title="Gesamtstunden alle Mitarbeiter" value={formatHours(adminTotalCurrentMonth)} subtitle="Laufender Monat bis heute" />
                 <StatCard title="Aktive Mitarbeiter" value={profiles.filter((p) => p.is_active).length} />
                 <StatCard title="Inaktive Mitarbeiter" value={profiles.filter((p) => !p.is_active).length} />
                 <StatCard title="Erfasste Einträge" value={allEntriesUntilToday.length} />
@@ -1243,17 +1279,31 @@ export default function Home() {
             <div className="space-y-4">
               <div className="rounded-2xl bg-white p-6 shadow">
                 <h2 className="text-xl font-bold">Zeiten bearbeiten</h2>
-                <div className="mt-4 max-w-md">
-                  <label className="text-sm font-medium">Mitarbeiter</label>
-                  <select
-                    value={adminSelectedUserId}
-                    onChange={(e) => setAdminSelectedUserId(e.target.value)}
-                    className="mt-1 w-full rounded-lg border px-3 py-2"
-                  >
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>{p.full_name}</option>
-                    ))}
-                  </select>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium">Mitarbeiter</label>
+                    <select
+                      value={adminSelectedUserId}
+                      onChange={(e) => setAdminSelectedUserId(e.target.value)}
+                      className="mt-1 w-full rounded-lg border px-3 py-2"
+                    >
+                      {profiles.map((p) => (
+                        <option key={p.id} value={p.id}>{p.full_name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="rounded-xl border bg-neutral-50 p-4">
+                    <p className="text-sm text-neutral-500">Gesamtstunden im laufenden Monat</p>
+                    <p className="mt-2 text-2xl font-bold">
+                      {formatHours(selectedAdminCurrentMonthMinutes)}
+                    </p>
+                    {selectedAdminProfile && (
+                      <p className="mt-1 text-xs text-neutral-500">
+                        {selectedAdminProfile.full_name}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
