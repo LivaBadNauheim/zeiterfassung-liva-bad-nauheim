@@ -70,14 +70,9 @@ function calculateMinutes(entry: TimeEntry) {
   if (!entry.start_time || !entry.end_time) return 0
 
   const start = minutesFromTime(entry.start_time)
-  let end = minutesFromTime(entry.end_time)
+  const end = minutesFromTime(entry.end_time)
 
-  // Wenn die Endzeit kleiner oder gleich der Startzeit ist,
-  // wird automatisch angenommen, dass die Arbeit über Mitternacht ging.
-  // Beispiel: 17:00 bis 00:00 = 7 Stunden
-  if (end <= start) {
-    end += 24 * 60
-  }
+  if (end <= start) return 0
 
   return Math.max(0, end - start - (entry.break_minutes || 0))
 }
@@ -274,11 +269,15 @@ function Sidebar({
   activeView,
   setActiveView,
   onLogout,
+  darkMode,
+  toggleDarkMode,
 }: {
   profile: Profile
   activeView: string
   setActiveView: (view: any) => void
   onLogout: () => Promise<void>
+  darkMode: boolean
+  toggleDarkMode: () => void
 }) {
   const adminItems: { key: AdminView; label: string }[] = [
     { key: "dashboard", label: "Dashboard" },
@@ -322,8 +321,15 @@ function Sidebar({
         ))}
 
         <button
+          onClick={toggleDarkMode}
+          className="mt-4 rounded-xl border px-4 py-3 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100"
+        >
+          {darkMode ? "☀️ Lightmode" : "🌙 Darkmode"}
+        </button>
+
+        <button
           onClick={onLogout}
-          className="mt-4 rounded-xl border border-red-200 px-4 py-3 text-left text-sm font-medium text-red-700 hover:bg-red-50"
+          className="mt-2 rounded-xl border border-red-200 px-4 py-3 text-left text-sm font-medium text-red-700 hover:bg-red-50"
         >
           Abmelden
         </button>
@@ -554,6 +560,7 @@ function TimeEntryTable({
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [darkMode, setDarkMode] = useState(false)
 
   const [employeeView, setEmployeeView] = useState<EmployeeView>("dashboard")
   const [adminView, setAdminView] = useState<AdminView>("dashboard")
@@ -593,6 +600,12 @@ export default function Home() {
 
   useEffect(() => {
     init()
+
+    const savedTheme = localStorage.getItem("zeiterfassung-theme")
+    if (savedTheme === "dark") {
+      setDarkMode(true)
+      document.documentElement.classList.add("dark")
+    }
   }, [])
 
   useEffect(() => {
@@ -646,6 +659,22 @@ export default function Home() {
   async function handleLogout() {
     await supabase.auth.signOut()
     setProfile(null)
+  }
+
+  function toggleDarkMode() {
+    setDarkMode((current) => {
+      const next = !current
+
+      if (next) {
+        localStorage.setItem("zeiterfassung-theme", "dark")
+        document.documentElement.classList.add("dark")
+      } else {
+        localStorage.setItem("zeiterfassung-theme", "light")
+        document.documentElement.classList.remove("dark")
+      }
+
+      return next
+    })
   }
 
   async function fetchProfiles() {
@@ -1087,13 +1116,98 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-neutral-100 p-4">
+    <main className={darkMode ? "time-app time-app-dark min-h-screen bg-neutral-950 p-4 text-neutral-100" : "time-app time-app-light min-h-screen bg-neutral-200 p-4 text-neutral-950"}>
+      <style jsx global>{`
+        .time-app-light .bg-white {
+          background-color: #f8fafc !important;
+          color: #0f172a !important;
+        }
+
+        .time-app-light .bg-neutral-50 {
+          background-color: #e5e7eb !important;
+        }
+
+        .time-app-light .border,
+        .time-app-light .border-b {
+          border-color: #cbd5e1 !important;
+        }
+
+        .time-app-light input,
+        .time-app-light select {
+          background-color: #ffffff !important;
+          color: #0f172a !important;
+          border-color: #94a3b8 !important;
+        }
+
+        .time-app-light input:disabled,
+        .time-app-light select:disabled {
+          background-color: #e5e7eb !important;
+          color: #64748b !important;
+        }
+
+        .time-app-dark {
+          background-color: #020617 !important;
+          color: #e5e7eb !important;
+        }
+
+        .time-app-dark .bg-white,
+        .time-app-dark .bg-neutral-50,
+        .time-app-dark .bg-neutral-100,
+        .time-app-dark .bg-neutral-200 {
+          background-color: #0f172a !important;
+          color: #e5e7eb !important;
+        }
+
+        .time-app-dark .text-neutral-400,
+        .time-app-dark .text-neutral-500,
+        .time-app-dark .text-neutral-600,
+        .time-app-dark .text-neutral-700 {
+          color: #cbd5e1 !important;
+        }
+
+        .time-app-dark .border,
+        .time-app-dark .border-b {
+          border-color: #334155 !important;
+        }
+
+        .time-app-dark input,
+        .time-app-dark select {
+          background-color: #020617 !important;
+          color: #f8fafc !important;
+          border-color: #475569 !important;
+        }
+
+        .time-app-dark input::placeholder {
+          color: #94a3b8 !important;
+        }
+
+        .time-app-dark input:disabled,
+        .time-app-dark select:disabled {
+          background-color: #1e293b !important;
+          color: #94a3b8 !important;
+        }
+
+        .time-app-dark .shadow {
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+        }
+
+        .time-app-dark .bg-black {
+          background-color: #2563eb !important;
+        }
+
+        .time-app-dark .hover\:bg-neutral-100:hover {
+          background-color: #1e293b !important;
+        }
+      `}</style>
+
       <div className="flex flex-col gap-4 lg:flex-row">
         <Sidebar
           profile={profile}
           activeView={profile.role === "admin" ? adminView : employeeView}
           setActiveView={profile.role === "admin" ? setAdminView : setEmployeeView}
           onLogout={handleLogout}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
         />
 
         <section className="flex-1 space-y-6">
