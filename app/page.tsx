@@ -70,9 +70,14 @@ function calculateMinutes(entry: TimeEntry) {
   if (!entry.start_time || !entry.end_time) return 0
 
   const start = minutesFromTime(entry.start_time)
-  const end = minutesFromTime(entry.end_time)
+  let end = minutesFromTime(entry.end_time)
 
-  if (end <= start) return 0
+  // Arbeitszeiten über Mitternacht korrekt berechnen.
+  // Beispiel: 17:00 bis 00:00 = 7:00 Std.
+  // Beispiel: 22:00 bis 02:00 = 4:00 Std.
+  if (end <= start) {
+    end += 24 * 60
+  }
 
   return Math.max(0, end - start - (entry.break_minutes || 0))
 }
