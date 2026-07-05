@@ -41,7 +41,14 @@ const entryTypeLabels: Record<TimeEntry["entry_type"], string> = {
 }
 
 function formatDate(date: Date) {
-  return date.toISOString().slice(0, 10)
+  // WICHTIG: lokale Zeit verwenden, nicht toISOString() (UTC).
+  // toISOString() verschiebt lokale Mitternacht in DE (UTC+1/+2) auf den Vortag
+  // und führte dazu, dass gespeicherte Daten und Export-Zeiträume um einen Tag
+  // daneben lagen.
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function getMonday(date: Date) {
@@ -117,6 +124,52 @@ function getCurrentMonthInput() {
 
 function todayDateString() {
   return formatDate(new Date())
+}
+
+function addMonths(date: Date, months: number) {
+  const d = new Date(date)
+  d.setDate(1)
+  d.setMonth(d.getMonth() + months)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+type PeriodMode = "week" | "month"
+
+// Liefert den Datumsbereich (start/end als "YYYY-MM-DD") für die Anzeige,
+// je nachdem ob Wochen- oder Monatsansicht aktiv ist.
+function getPeriodRange(anchor: Date, mode: PeriodMode) {
+  if (mode === "month") {
+    return getMonthRangeFromDate(anchor)
+  }
+
+  const monday = getMonday(anchor)
+  return {
+    start: formatDate(monday),
+    end: formatDate(addDays(monday, 6)),
+  }
+}
+
+// Erzeugt die Liste der anzuzeigenden Tage für den aktuellen Zeitraum.
+function getPeriodDays(anchor: Date, mode: PeriodMode) {
+  if (mode === "month") {
+    const year = anchor.getFullYear()
+    const month = anchor.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    return Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1))
+  }
+
+  const monday = getMonday(anchor)
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i))
+}
+
+function getPeriodLabel(anchor: Date, mode: PeriodMode) {
+  if (mode === "month") {
+    return anchor.toLocaleDateString("de-DE", { month: "long", year: "numeric" })
+  }
+
+  const days = getPeriodDays(anchor, "week")
+  return `${formatDate(days[0])} bis ${formatDate(days[6])}`
 }
 
 function excelDownload(filename: string, rows: string[][]) {
@@ -345,40 +398,64 @@ function Sidebar({
 
 function TimeEntryTable({
   userId,
-  currentWeek,
-  setCurrentWeek,
+  anchorDate,
+  setAnchorDate,
+  periodMode,
+  setPeriodMode,
   entries,
   dirtyDates,
   savingDate,
   onChangeEntry,
   onSaveEntry,
+  onSaveAll,
+  isSavingAll,
   title,
 }: {
   userId: string
-  currentWeek: Date
-  setCurrentWeek: (date: Date) => void
+  anchorDate: Date
+  setAnchorDate: (date: Date) => void
+  periodMode: PeriodMode
+  setPeriodMode: (mode: PeriodMode) => void
   entries: TimeEntry[]
   dirtyDates: Set<string>
   savingDate: string | null
   onChangeEntry: (date: string, changes: Partial<TimeEntry>) => void
   onSaveEntry: (date: string) => void
+  onSaveAll: () => void
+  isSavingAll: boolean
   title: string
 }) {
-  const weekDays = useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i))
-  }, [currentWeek])
+  const days = useMemo(() => {
+    return getPeriodDays(anchorDate, periodMode)
+  }, [anchorDate, periodMode])
 
-  const weekStart = formatDate(weekDays[0])
-  const weekEnd = formatDate(weekDays[6])
+  const periodLabel = getPeriodLabel(anchorDate, periodMode)
+  const today = todayDateString()
 
   function jumpToDate(dateValue: string) {
     if (!dateValue) return
-    setCurrentWeek(getMonday(new Date(`${dateValue}T12:00:00`)))
+    setAnchorDate(new Date(`${dateValue}T12:00:00`))
+  }
+
+  function goPrevious() {
+    setAnchorDate(periodMode === "month" ? addMonths(anchorDate, -1) : addDays(getMonday(anchorDate), -7))
+  }
+
+  function goNext() {
+    setAnchorDate(periodMode === "month" ? addMonths(anchorDate, 1) : addDays(getMonday(anchorDate), 7))
   }
 
   function getEntryForDate(date: string) {
     return entries.find((entry) => entry.work_date === date) || getEmptyEntry(userId, date)
   }
+
+  // Summe und Anzahl ungespeicherter Änderungen nur für den angezeigten Zeitraum.
+  const visibleDates = days.map((day) => formatDate(day))
+  const periodMinutes = visibleDates.reduce(
+    (sum, date) => sum + calculateMinutes(getEntryForDate(date)),
+    0
+  )
+  const dirtyInPeriod = visibleDates.filter((date) => dirtyDates.has(date)).length
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
@@ -386,11 +463,35 @@ function TimeEntryTable({
         <div>
           <h2 className="text-xl font-bold">{title}</h2>
           <p className="text-sm text-neutral-600">
-            {weekStart} bis {weekEnd}
+            {periodLabel} · Summe: {formatHours(periodMinutes)}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Umschalter Woche / Monat */}
+          <div className="flex rounded-lg border p-1 text-sm font-medium">
+            <button
+              onClick={() => setPeriodMode("week")}
+              className={
+                periodMode === "week"
+                  ? "rounded-md bg-black px-3 py-1.5 text-white"
+                  : "rounded-md px-3 py-1.5 text-neutral-600"
+              }
+            >
+              Woche
+            </button>
+            <button
+              onClick={() => setPeriodMode("month")}
+              className={
+                periodMode === "month"
+                  ? "rounded-md bg-black px-3 py-1.5 text-white"
+                  : "rounded-md px-3 py-1.5 text-neutral-600"
+              }
+            >
+              Monat
+            </button>
+          </div>
+
           <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium">
             <span>📅</span>
             <input
@@ -401,26 +502,35 @@ function TimeEntryTable({
             />
           </label>
 
-          <button
-            onClick={() => setCurrentWeek(addDays(currentWeek, -7))}
-            className="rounded-lg border px-4 py-2"
-          >
-            Vorherige Woche
+          <button onClick={goPrevious} className="rounded-lg border px-4 py-2">
+            {periodMode === "month" ? "Voriger Monat" : "Vorherige Woche"}
           </button>
           <button
-            onClick={() => setCurrentWeek(getMonday(new Date()))}
+            onClick={() => setAnchorDate(new Date())}
             className="rounded-lg border px-4 py-2"
           >
-            Heute
+            {periodMode === "month" ? "Aktueller Monat" : "Heute"}
           </button>
-          <button
-            onClick={() => setCurrentWeek(addDays(currentWeek, 7))}
-            className="rounded-lg border px-4 py-2"
-          >
-            Nächste Woche
+          <button onClick={goNext} className="rounded-lg border px-4 py-2">
+            {periodMode === "month" ? "Nächster Monat" : "Nächste Woche"}
           </button>
         </div>
       </div>
+
+      {dirtyInPeriod > 0 && (
+        <div className="mb-4 flex flex-col items-start justify-between gap-2 rounded-xl border border-yellow-200 bg-yellow-50 p-3 sm:flex-row sm:items-center">
+          <span className="text-sm font-medium text-yellow-800">
+            {dirtyInPeriod} ungespeicherte Änderung{dirtyInPeriod === 1 ? "" : "en"} in diesem Zeitraum
+          </span>
+          <button
+            onClick={onSaveAll}
+            disabled={isSavingAll}
+            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {isSavingAll ? "Speichert..." : "Alle speichern"}
+          </button>
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[980px] border-collapse text-sm">
@@ -439,21 +549,40 @@ function TimeEntryTable({
           </thead>
 
           <tbody>
-            {weekDays.map((day) => {
+            {days.map((day, index) => {
               const date = formatDate(day)
               const entry = getEntryForDate(date)
               const isWork = entry.entry_type === "work"
               const status = getEntryStatus(entry, dirtyDates)
               const isSaving = savingDate === date
 
+              const weekday = day.getDay()
+              const isWeekend = weekday === 0 || weekday === 6
+              const isToday = date === today
+              // Im Monat: dezenter Trenner zu Beginn jeder neuen Woche (Montag).
+              const isWeekStart = periodMode === "month" && index > 0 && weekday === 1
+
+              const rowClasses = [
+                "border-b",
+                isWeekStart ? "border-t-2 border-t-neutral-200" : "",
+                isToday ? "bg-blue-50" : isWeekend ? "bg-neutral-50/60" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")
+
               return (
-                <tr key={date} className="border-b">
+                <tr key={date} className={rowClasses}>
                   <td className="p-3 font-medium">
                     {day.toLocaleDateString("de-DE", {
                       weekday: "long",
                       day: "2-digit",
                       month: "2-digit",
                     })}
+                    {isToday && (
+                      <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                        Heute
+                      </span>
+                    )}
                   </td>
 
                   <td className="p-3">
@@ -574,16 +703,20 @@ export default function Home() {
   const [allEntriesUntilToday, setAllEntriesUntilToday] = useState<TimeEntry[]>([])
 
   const [employeeWeek, setEmployeeWeek] = useState(getMonday(new Date()))
+  const [employeePeriodMode, setEmployeePeriodMode] = useState<PeriodMode>("week")
   const [employeeEntries, setEmployeeEntries] = useState<TimeEntry[]>([])
   const [employeeMonthEntries, setEmployeeMonthEntries] = useState<TimeEntry[]>([])
   const [employeeDirtyDates, setEmployeeDirtyDates] = useState<Set<string>>(new Set())
   const [employeeSavingDate, setEmployeeSavingDate] = useState<string | null>(null)
+  const [employeeSavingAll, setEmployeeSavingAll] = useState(false)
 
   const [adminSelectedUserId, setAdminSelectedUserId] = useState("")
   const [adminWeek, setAdminWeek] = useState(getMonday(new Date()))
+  const [adminPeriodMode, setAdminPeriodMode] = useState<PeriodMode>("week")
   const [adminEntries, setAdminEntries] = useState<TimeEntry[]>([])
   const [adminDirtyDates, setAdminDirtyDates] = useState<Set<string>>(new Set())
   const [adminSavingDate, setAdminSavingDate] = useState<string | null>(null)
+  const [adminSavingAll, setAdminSavingAll] = useState(false)
 
   const [createFullName, setCreateFullName] = useState("")
   const [createEmail, setCreateEmail] = useState("")
@@ -625,13 +758,13 @@ export default function Home() {
       fetchEmployeeEntries()
       fetchEmployeeMonthEntries()
     }
-  }, [profile, employeeWeek])
+  }, [profile, employeeWeek, employeePeriodMode])
 
   useEffect(() => {
     if (profile?.role === "admin" && adminSelectedUserId) {
       fetchAdminEntries()
     }
-  }, [profile, adminSelectedUserId, adminWeek])
+  }, [profile, adminSelectedUserId, adminWeek, adminPeriodMode])
 
   async function init() {
     setLoading(true)
@@ -711,16 +844,14 @@ export default function Home() {
   async function fetchEmployeeEntries() {
     if (!profile) return
 
-    const weekDays = Array.from({ length: 7 }, (_, i) => addDays(employeeWeek, i))
-    const weekStart = formatDate(weekDays[0])
-    const weekEnd = formatDate(weekDays[6])
+    const { start, end } = getPeriodRange(employeeWeek, employeePeriodMode)
 
     const { data, error } = await supabase
       .from("time_entries")
       .select("*")
       .eq("user_id", profile.id)
-      .gte("work_date", weekStart)
-      .lte("work_date", weekEnd)
+      .gte("work_date", start)
+      .lte("work_date", end)
       .order("work_date", { ascending: true })
 
     if (!error) {
@@ -751,16 +882,14 @@ export default function Home() {
   }
 
   async function fetchAdminEntries() {
-    const weekDays = Array.from({ length: 7 }, (_, i) => addDays(adminWeek, i))
-    const weekStart = formatDate(weekDays[0])
-    const weekEnd = formatDate(weekDays[6])
+    const { start, end } = getPeriodRange(adminWeek, adminPeriodMode)
 
     const { data, error } = await supabase
       .from("time_entries")
       .select("*")
       .eq("user_id", adminSelectedUserId)
-      .gte("work_date", weekStart)
-      .lte("work_date", weekEnd)
+      .gte("work_date", start)
+      .lte("work_date", end)
       .order("work_date", { ascending: true })
 
     if (!error) {
@@ -868,6 +997,69 @@ export default function Home() {
       return next
     })
 
+    await fetchAllEntriesUntilToday()
+  }
+
+  async function saveAllEmployeeEntries() {
+    if (!profile) return
+
+    const dates = Array.from(employeeDirtyDates)
+    if (dates.length === 0) return
+
+    const payload = dates.map((date) => {
+      const entry =
+        employeeEntries.find((e) => e.work_date === date) || getEmptyEntry(profile.id, date)
+      return normalizeEntryForSave(entry)
+    })
+
+    setEmployeeSavingAll(true)
+
+    const { error } = await supabase
+      .from("time_entries")
+      .upsert(payload, { onConflict: "user_id,work_date" })
+      .select()
+
+    setEmployeeSavingAll(false)
+
+    if (error) {
+      alert("Fehler beim Speichern: " + error.message)
+      return
+    }
+
+    setEmployeeDirtyDates(new Set())
+    await fetchEmployeeEntries()
+    await fetchEmployeeMonthEntries()
+    await fetchAllEntriesUntilToday()
+  }
+
+  async function saveAllAdminEntries() {
+    if (!adminSelectedUserId) return
+
+    const dates = Array.from(adminDirtyDates)
+    if (dates.length === 0) return
+
+    const payload = dates.map((date) => {
+      const entry =
+        adminEntries.find((e) => e.work_date === date) || getEmptyEntry(adminSelectedUserId, date)
+      return normalizeEntryForSave(entry)
+    })
+
+    setAdminSavingAll(true)
+
+    const { error } = await supabase
+      .from("time_entries")
+      .upsert(payload, { onConflict: "user_id,work_date" })
+      .select()
+
+    setAdminSavingAll(false)
+
+    if (error) {
+      alert("Fehler beim Speichern: " + error.message)
+      return
+    }
+
+    setAdminDirtyDates(new Set())
+    await fetchAdminEntries()
     await fetchAllEntriesUntilToday()
   }
 
@@ -1254,13 +1446,17 @@ export default function Home() {
           {profile.role === "employee" && employeeView === "time" && (
             <TimeEntryTable
               userId={profile.id}
-              currentWeek={employeeWeek}
-              setCurrentWeek={setEmployeeWeek}
+              anchorDate={employeeWeek}
+              setAnchorDate={setEmployeeWeek}
+              periodMode={employeePeriodMode}
+              setPeriodMode={setEmployeePeriodMode}
               entries={employeeEntries}
               dirtyDates={employeeDirtyDates}
               savingDate={employeeSavingDate}
               onChangeEntry={updateEmployeeLocalEntry}
               onSaveEntry={saveEmployeeEntry}
+              onSaveAll={saveAllEmployeeEntries}
+              isSavingAll={employeeSavingAll}
               title="Zeiten erfassen"
             />
           )}
@@ -1276,13 +1472,17 @@ export default function Home() {
 
               <TimeEntryTable
                 userId={profile.id}
-                currentWeek={employeeWeek}
-                setCurrentWeek={setEmployeeWeek}
+                anchorDate={employeeWeek}
+                setAnchorDate={setEmployeeWeek}
+                periodMode={employeePeriodMode}
+                setPeriodMode={setEmployeePeriodMode}
                 entries={employeeEntries}
                 dirtyDates={employeeDirtyDates}
                 savingDate={employeeSavingDate}
                 onChangeEntry={updateEmployeeLocalEntry}
                 onSaveEntry={saveEmployeeEntry}
+                onSaveAll={saveAllEmployeeEntries}
+                isSavingAll={employeeSavingAll}
                 title="Meine Übersicht"
               />
             </>
@@ -1433,13 +1633,17 @@ export default function Home() {
 
               <TimeEntryTable
                 userId={adminSelectedUserId}
-                currentWeek={adminWeek}
-                setCurrentWeek={setAdminWeek}
+                anchorDate={adminWeek}
+                setAnchorDate={setAdminWeek}
+                periodMode={adminPeriodMode}
+                setPeriodMode={setAdminPeriodMode}
                 entries={adminEntries}
                 dirtyDates={adminDirtyDates}
                 savingDate={adminSavingDate}
                 onChangeEntry={updateAdminLocalEntry}
                 onSaveEntry={saveAdminEntry}
+                onSaveAll={saveAllAdminEntries}
+                isSavingAll={adminSavingAll}
                 title={`Zeiten bearbeiten${selectedAdminProfile ? `: ${selectedAdminProfile.full_name}` : ""}`}
               />
             </div>
