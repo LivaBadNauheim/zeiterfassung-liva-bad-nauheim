@@ -714,6 +714,7 @@ export default function Home() {
   const [adminWeek, setAdminWeek] = useState(getMonday(new Date()))
   const [adminPeriodMode, setAdminPeriodMode] = useState<PeriodMode>("week")
   const [adminEntries, setAdminEntries] = useState<TimeEntry[]>([])
+  const [adminMonthEntries, setAdminMonthEntries] = useState<TimeEntry[]>([])
   const [adminDirtyDates, setAdminDirtyDates] = useState<Set<string>>(new Set())
   const [adminSavingDate, setAdminSavingDate] = useState<string | null>(null)
   const [adminSavingAll, setAdminSavingAll] = useState(false)
@@ -763,6 +764,7 @@ export default function Home() {
   useEffect(() => {
     if (profile?.role === "admin" && adminSelectedUserId) {
       fetchAdminEntries()
+      fetchAdminMonthEntries()
     }
   }, [profile, adminSelectedUserId, adminWeek, adminPeriodMode])
 
@@ -903,6 +905,22 @@ export default function Home() {
     }
   }
 
+  async function fetchAdminMonthEntries() {
+    if (!adminSelectedUserId) return
+
+    const { start, end } = getMonthRangeFromDate(adminWeek)
+
+    const { data, error } = await supabase
+      .from("time_entries")
+      .select("*")
+      .eq("user_id", adminSelectedUserId)
+      .gte("work_date", start)
+      .lte("work_date", end)
+      .order("work_date", { ascending: true })
+
+    if (!error) setAdminMonthEntries(data || [])
+  }
+
   function updateEmployeeLocalEntry(date: string, changes: Partial<TimeEntry>) {
     if (!profile) return
 
@@ -997,6 +1015,7 @@ export default function Home() {
       return next
     })
 
+    await fetchAdminMonthEntries()
     await fetchAllEntriesUntilToday()
   }
 
@@ -1060,6 +1079,7 @@ export default function Home() {
 
     setAdminDirtyDates(new Set())
     await fetchAdminEntries()
+    await fetchAdminMonthEntries()
     await fetchAllEntriesUntilToday()
   }
 
@@ -1263,21 +1283,20 @@ export default function Home() {
       .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
   }, [allEntriesUntilToday])
 
-  const selectedAdminCurrentMonthMinutes = useMemo(() => {
-    if (!adminSelectedUserId) return 0
+  // Zusammenfassung für den aktuell angezeigten Monat des ausgewählten Mitarbeiters.
+  const adminMonthLabel = adminWeek.toLocaleDateString("de-DE", {
+    month: "long",
+    year: "numeric",
+  })
 
-    const { start } = getMonthRangeFromDate(new Date())
-    const today = todayDateString()
-
-    return allEntriesUntilToday
-      .filter(
-        (entry) =>
-          entry.user_id === adminSelectedUserId &&
-          entry.work_date >= start &&
-          entry.work_date <= today
-      )
-      .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
-  }, [adminSelectedUserId, allEntriesUntilToday])
+  const adminMonthSummary = useMemo(() => {
+    return {
+      workMinutes: adminMonthEntries.reduce((sum, entry) => sum + calculateMinutes(entry), 0),
+      vacationDays: adminMonthEntries.filter((entry) => entry.entry_type === "vacation").length,
+      sickDays: adminMonthEntries.filter((entry) => entry.entry_type === "sick").length,
+      dayOffDays: adminMonthEntries.filter((entry) => entry.entry_type === "day_off").length,
+    }
+  }, [adminMonthEntries])
 
   const adminTopThree = useMemo(() => {
     return profiles
@@ -1618,12 +1637,19 @@ export default function Home() {
                   </div>
 
                   <div className="rounded-xl border bg-neutral-50 p-4">
-                    <p className="text-sm text-neutral-500">Gesamtstunden im laufenden Monat</p>
-                    <p className="mt-2 text-2xl font-bold">
-                      {formatHours(selectedAdminCurrentMonthMinutes)}
+                    <p className="text-sm text-neutral-500">
+                      Arbeitsstunden {adminMonthLabel}
                     </p>
+                    <p className="mt-2 text-3xl font-bold">
+                      {formatHours(adminMonthSummary.workMinutes)}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600">
+                      <span>Urlaub: {adminMonthSummary.vacationDays} Tage</span>
+                      <span>Krank: {adminMonthSummary.sickDays} Tage</span>
+                      <span>Frei: {adminMonthSummary.dayOffDays} Tage</span>
+                    </div>
                     {selectedAdminProfile && (
-                      <p className="mt-1 text-xs text-neutral-500">
+                      <p className="mt-2 text-xs text-neutral-500">
                         {selectedAdminProfile.full_name}
                       </p>
                     )}
