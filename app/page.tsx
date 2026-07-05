@@ -51,6 +51,40 @@ function formatDate(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+// Liefert das aktuelle Datum/die aktuelle Uhrzeit fest bezogen auf die deutsche
+// Zeitzone (Europe/Berlin) – unabhängig davon, wie das Gerät des Nutzers
+// eingestellt ist. So wird "heute" / "aktuelle Woche" / "aktueller Monat" immer
+// nach deutscher Zeit bestimmt, auch wenn jemand aus dem Urlaub in einer anderen
+// Zeitzone Zeiten bearbeitet.
+//
+// Hinweis: Der zurückgegebene Date-Wert wird nur über seine Kalenderfelder
+// (Jahr/Monat/Tag/Wochentag) genutzt, nie über seinen absoluten Zeitpunkt.
+function berlinNow() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date())
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "0"
+
+  const hour = Number(get("hour")) % 24 // Absicherung gegen "24" (iOS-Eigenheit)
+
+  return new Date(
+    Number(get("year")),
+    Number(get("month")) - 1,
+    Number(get("day")),
+    hour,
+    Number(get("minute")),
+    Number(get("second"))
+  )
+}
+
 function getMonday(date: Date) {
   const d = new Date(date)
   const day = d.getDay()
@@ -118,12 +152,12 @@ function getMonthRangeFromInput(monthInput: string) {
 }
 
 function getCurrentMonthInput() {
-  const now = new Date()
+  const now = berlinNow()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
 }
 
 function todayDateString() {
-  return formatDate(new Date())
+  return formatDate(berlinNow())
 }
 
 function addMonths(date: Date, months: number) {
@@ -506,7 +540,7 @@ function TimeEntryTable({
             {periodMode === "month" ? "Voriger Monat" : "Vorherige Woche"}
           </button>
           <button
-            onClick={() => setAnchorDate(new Date())}
+            onClick={() => setAnchorDate(berlinNow())}
             className="rounded-lg border px-4 py-2"
           >
             {periodMode === "month" ? "Aktueller Monat" : "Heute"}
@@ -702,7 +736,7 @@ export default function Home() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [allEntriesUntilToday, setAllEntriesUntilToday] = useState<TimeEntry[]>([])
 
-  const [employeeWeek, setEmployeeWeek] = useState(getMonday(new Date()))
+  const [employeeWeek, setEmployeeWeek] = useState(getMonday(berlinNow()))
   const [employeePeriodMode, setEmployeePeriodMode] = useState<PeriodMode>("week")
   const [employeeEntries, setEmployeeEntries] = useState<TimeEntry[]>([])
   const [employeeMonthEntries, setEmployeeMonthEntries] = useState<TimeEntry[]>([])
@@ -711,7 +745,7 @@ export default function Home() {
   const [employeeSavingAll, setEmployeeSavingAll] = useState(false)
 
   const [adminSelectedUserId, setAdminSelectedUserId] = useState("")
-  const [adminWeek, setAdminWeek] = useState(getMonday(new Date()))
+  const [adminWeek, setAdminWeek] = useState(getMonday(berlinNow()))
   const [adminPeriodMode, setAdminPeriodMode] = useState<PeriodMode>("week")
   const [adminEntries, setAdminEntries] = useState<TimeEntry[]>([])
   const [adminMonthEntries, setAdminMonthEntries] = useState<TimeEntry[]>([])
@@ -731,8 +765,8 @@ export default function Home() {
 
   const [activeLoadingId, setActiveLoadingId] = useState<string | null>(null)
 
-  const [exportFrom, setExportFrom] = useState(getMonthRangeFromDate(new Date()).start)
-  const [exportTo, setExportTo] = useState(getMonthRangeFromDate(new Date()).end)
+  const [exportFrom, setExportFrom] = useState(getMonthRangeFromDate(berlinNow()).start)
+  const [exportTo, setExportTo] = useState(getMonthRangeFromDate(berlinNow()).end)
   const [exportSelectedUserIds, setExportSelectedUserIds] = useState<string[]>([])
 
   const selectedAdminProfile = profiles.find((p) => p.id === adminSelectedUserId)
@@ -1275,7 +1309,7 @@ export default function Home() {
   }, [profile, allEntriesUntilToday])
 
   const adminTotalCurrentMonth = useMemo(() => {
-    const { start } = getMonthRangeFromDate(new Date())
+    const { start } = getMonthRangeFromDate(berlinNow())
     const today = todayDateString()
 
     return allEntriesUntilToday
