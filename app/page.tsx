@@ -232,13 +232,16 @@ function excelDownload(filename: string, rows: string[][]) {
 }
 
 function getEmptyEntry(userId: string, date: string): TimeEntry {
+  // Standard ist "Frei" mit leeren Feldern. Erst wenn der Nutzer bewusst
+  // "Arbeit" wählt und Zeiten einträgt, zählt der Tag als gearbeitet.
+  // Das verhindert versehentliches Speichern von 09-17-Standardzeiten.
   return {
     user_id: userId,
     work_date: date,
-    entry_type: "work",
-    start_time: "09:00",
-    end_time: "17:00",
-    break_minutes: 30,
+    entry_type: "day_off",
+    start_time: null,
+    end_time: null,
+    break_minutes: 0,
     note: null,
   }
 }
@@ -250,13 +253,19 @@ function getEntryStatus(entry: TimeEntry, dirtyDates: Set<string>) {
 }
 
 function normalizeEntryForSave(entry: TimeEntry) {
+  // Arbeit zählt nur, wenn Start und Ende gesetzt sind. Ist "Arbeit" gewählt,
+  // aber ein Zeitfeld leer, wird der Tag als "Frei" (nicht gearbeitet) gespeichert.
+  const hasTimes = Boolean(entry.start_time) && Boolean(entry.end_time)
+  const effectiveType = entry.entry_type === "work" && !hasTimes ? "day_off" : entry.entry_type
+  const isWork = effectiveType === "work"
+
   return {
     user_id: entry.user_id,
     work_date: entry.work_date,
-    entry_type: entry.entry_type,
-    start_time: entry.entry_type === "work" ? entry.start_time : null,
-    end_time: entry.entry_type === "work" ? entry.end_time : null,
-    break_minutes: entry.entry_type === "work" ? Number(entry.break_minutes || 0) : 0,
+    entry_type: effectiveType,
+    start_time: isWork ? entry.start_time || null : null,
+    end_time: isWork ? entry.end_time || null : null,
+    break_minutes: isWork ? Number(entry.break_minutes || 0) : 0,
     note: entry.note || null,
   }
 }
@@ -1301,10 +1310,20 @@ export default function Home() {
     excelDownload(filename, [header, ...rows])
   }
 
-  const employeeTotalUntilToday = useMemo(() => {
+  // Arbeitsstunden der aktuellen Kalenderwoche (Mo–So, nach deutscher Zeit).
+  const employeeWeekSummary = useMemo(() => {
     if (!profile) return 0
+    const monday = getMonday(berlinNow())
+    const weekStart = formatDate(monday)
+    const weekEnd = formatDate(addDays(monday, 6))
+
     return allEntriesUntilToday
-      .filter((entry) => entry.user_id === profile.id)
+      .filter(
+        (entry) =>
+          entry.user_id === profile.id &&
+          entry.work_date >= weekStart &&
+          entry.work_date <= weekEnd
+      )
       .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
   }, [profile, allEntriesUntilToday])
 
@@ -1343,6 +1362,12 @@ export default function Home() {
       .sort((a, b) => b.minutes - a.minutes)
       .slice(0, 3)
   }, [profiles, allEntriesUntilToday])
+
+  // Monatsname des aktuell angezeigten Monats (folgt der Navigation in der Tabelle).
+  const employeeMonthLabel = employeeWeek.toLocaleDateString("de-DE", {
+    month: "long",
+    year: "numeric",
+  })
 
   const employeeMonthSummary = useMemo(() => {
     return {
@@ -1471,8 +1496,8 @@ export default function Home() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
-                <StatCard title="Gesamtstunden bis heute" value={formatHours(employeeTotalUntilToday)} />
-                <StatCard title="Monatsstunden" value={formatHours(employeeMonthSummary.workMinutes)} />
+                <StatCard title="Wochenstunden" value={formatHours(employeeWeekSummary)} subtitle="Aktuelle Woche" />
+                <StatCard title="Monatsstunden" value={formatHours(employeeMonthSummary.workMinutes)} subtitle={employeeMonthLabel} />
                 <StatCard title="Urlaubstage im Monat" value={employeeMonthSummary.vacationDays} />
                 <StatCard title="Kranktage im Monat" value={employeeMonthSummary.sickDays} />
               </div>
@@ -1517,8 +1542,8 @@ export default function Home() {
           {profile.role === "employee" && employeeView === "overview" && (
             <>
               <div className="grid gap-4 md:grid-cols-4">
-                <StatCard title="Gesamtstunden bis heute" value={formatHours(employeeTotalUntilToday)} />
-                <StatCard title="Monatsstunden" value={formatHours(employeeMonthSummary.workMinutes)} />
+                <StatCard title="Wochenstunden" value={formatHours(employeeWeekSummary)} subtitle="Aktuelle Woche" />
+                <StatCard title="Monatsstunden" value={formatHours(employeeMonthSummary.workMinutes)} subtitle={employeeMonthLabel} />
                 <StatCard title="Urlaubstage" value={employeeMonthSummary.vacationDays} />
                 <StatCard title="Kranktage" value={employeeMonthSummary.sickDays} />
               </div>
