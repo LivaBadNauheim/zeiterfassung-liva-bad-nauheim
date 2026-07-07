@@ -297,21 +297,27 @@ function LoginScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-neutral-100 p-4">
+    <main className="flex min-h-screen items-center justify-center bg-paper p-4">
       <form
         onSubmit={handleLogin}
-        className="w-full max-w-md rounded-2xl bg-white p-8 shadow"
+        className="w-full max-w-md rounded-2xl bg-surface p-8 shadow-lg"
       >
-        <h1 className="text-2xl font-bold">Zeiterfassung</h1>
-        <p className="mt-2 text-sm text-neutral-600">
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-orange font-display text-2xl font-semibold text-navy-deep">L</span>
+          <div>
+            <h1 className="font-display text-3xl font-semibold leading-none text-navy">Liva</h1>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-neutral-500">Zeiterfassung</p>
+          </div>
+        </div>
+        <p className="mt-5 text-sm text-neutral-600">
           Melde dich mit deinem internen Zugang an.
         </p>
 
         <div className="mt-6 space-y-4">
           <div>
-            <label className="text-sm font-medium">Login-Adresse</label>
+            <label className="text-sm font-medium text-ink">Login-Adresse</label>
             <input
-              className="mt-1 w-full rounded-lg border px-3 py-2"
+              className="mt-1 w-full rounded-lg border border-[#cbd2de] px-3 py-2 focus:border-orange focus:outline-2 focus:outline-orange"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="vorname.nachname@zeiterfassung.local"
@@ -319,9 +325,9 @@ function LoginScreen({ onLogin }: { onLogin: () => Promise<void> }) {
           </div>
 
           <div>
-            <label className="text-sm font-medium">Passwort</label>
+            <label className="text-sm font-medium text-ink">Passwort</label>
             <input
-              className="mt-1 w-full rounded-lg border px-3 py-2"
+              className="mt-1 w-full rounded-lg border border-[#cbd2de] px-3 py-2 focus:border-orange focus:outline-2 focus:outline-orange"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               type="password"
@@ -337,7 +343,7 @@ function LoginScreen({ onLogin }: { onLogin: () => Promise<void> }) {
 
           <button
             disabled={loginLoading}
-            className="w-full rounded-lg bg-black px-4 py-2 font-medium text-white disabled:opacity-50"
+            className="w-full rounded-lg bg-orange px-4 py-2.5 font-semibold text-navy-deep shadow-sm transition-colors hover:bg-orange-strong disabled:opacity-50"
           >
             {loginLoading ? "Anmelden..." : "Anmelden"}
           </button>
@@ -359,7 +365,7 @@ function StatCard({
   return (
     <div className="rounded-2xl bg-white p-5 shadow">
       <p className="text-sm text-neutral-500">{title}</p>
-      <p className="mt-2 text-2xl font-bold">{value}</p>
+      <p className="mt-2 font-mono text-2xl font-medium tabular-nums">{value}</p>
       {subtitle && <p className="mt-1 text-xs text-neutral-500">{subtitle}</p>}
     </div>
   )
@@ -400,10 +406,16 @@ function Sidebar({
 
   return (
     <aside className="w-full rounded-2xl bg-white p-4 shadow lg:min-h-[calc(100vh-2rem)] lg:w-72">
-      <div className="mb-6">
-        <h1 className="text-xl font-bold">Zeiterfassung</h1>
-        <p className="mt-1 text-sm text-neutral-600">{profile.full_name}</p>
-        <p className="text-xs text-neutral-400">{profile.role}</p>
+      <div className="mb-6 border-b pb-4">
+        <div className="flex items-center gap-2">
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-orange font-display text-xl font-semibold text-navy-deep">L</span>
+          <div>
+            <h1 className="font-display text-2xl font-semibold leading-none text-orange">Liva</h1>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-neutral-500">Zeiterfassung</p>
+          </div>
+        </div>
+        <p className="mt-4 text-sm font-semibold text-neutral-700">{profile.full_name}</p>
+        <p className="text-xs text-neutral-400">{profile.role === "admin" ? "Administrator" : "Mitarbeiter"}</p>
       </div>
 
       <nav className="flex flex-col gap-2">
@@ -504,9 +516,9 @@ function TimeEntryTable({
     <div className="rounded-2xl bg-white p-6 shadow">
       <div className="mb-6 flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
         <div>
-          <h2 className="text-xl font-bold">{title}</h2>
+          <h2 className="font-display text-xl font-semibold">{title}</h2>
           <p className="text-sm text-neutral-600">
-            {periodLabel} · Summe: {formatHours(periodMinutes)}
+            {periodLabel} · Summe: <span className="font-mono font-medium tabular-nums">{formatHours(periodMinutes)}</span>
           </p>
         </div>
 
@@ -568,7 +580,7 @@ function TimeEntryTable({
           <button
             onClick={onSaveAll}
             disabled={isSavingAll}
-            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-lg bg-orange px-4 py-2 text-sm font-semibold text-navy-deep shadow-sm disabled:opacity-50"
           >
             {isSavingAll ? "Speichert..." : "Alle speichern"}
           </button>
@@ -682,7 +694,7 @@ function TimeEntryTable({
                     />
                   </td>
 
-                  <td className="p-3 font-medium">{formatHours(calculateMinutes(entry))}</td>
+                  <td className="p-3 font-mono font-medium tabular-nums">{formatHours(calculateMinutes(entry))}</td>
 
                   <td className="p-3">
                     <input
@@ -1391,87 +1403,125 @@ export default function Home() {
   }
 
   return (
-    <main className={darkMode ? "time-app time-app-dark min-h-screen bg-neutral-950 p-4 text-neutral-100" : "time-app time-app-light min-h-screen bg-neutral-200 p-4 text-neutral-950"}>
+    <main className={darkMode ? "time-app time-app-dark min-h-screen bg-[#0d1526] p-4 text-neutral-100" : "time-app time-app-light min-h-screen bg-paper p-4 text-[#1b2536]"}>
       <style jsx global>{`
+        .time-app-light {
+          background-color: #f2f3f6;
+        }
+
+        /* Karten / Oberflächen */
         .time-app-light .bg-white {
-          background-color: #f8fafc !important;
-          color: #0f172a !important;
+          background-color: #ffffff !important;
+          color: #1b2536 !important;
         }
 
         .time-app-light .bg-neutral-50 {
-          background-color: #e5e7eb !important;
+          background-color: #eef1f6 !important;
+        }
+
+        .time-app-light .bg-neutral-100 {
+          background-color: #e7ebf2 !important;
         }
 
         .time-app-light .border,
         .time-app-light .border-b {
-          border-color: #cbd5e1 !important;
+          border-color: #e2e6ee !important;
         }
 
+        /* Primär-/Aktiv-Flächen (vormals schwarz) -> Marineblau */
+        .time-app-light .bg-black {
+          background-color: #1f2e52 !important;
+        }
+
+        /* Sekundärtext fein abgestuft */
+        .time-app-light .text-neutral-400 { color: #96a0b1 !important; }
+        .time-app-light .text-neutral-500 { color: #626b7c !important; }
+        .time-app-light .text-neutral-600 { color: #4e5666 !important; }
+        .time-app-light .text-neutral-700 { color: #3a4152 !important; }
+
+        /* "Heute"-Markierung: Orange statt Blau */
+        .time-app-light .bg-blue-50 { background-color: #fdf1e1 !important; }
+        .time-app-light .bg-blue-100 { background-color: #fbe8d2 !important; }
+        .time-app-light .text-blue-700 { color: #a65a15 !important; }
+
+        /* Formularfelder */
         .time-app-light input,
         .time-app-light select {
           background-color: #ffffff !important;
-          color: #0f172a !important;
-          border-color: #94a3b8 !important;
+          color: #1b2536 !important;
+          border-color: #cbd2de !important;
+        }
+
+        .time-app-light input:focus,
+        .time-app-light select:focus {
+          outline: 2px solid #e88e36 !important;
+          outline-offset: 1px;
+          border-color: #e88e36 !important;
         }
 
         .time-app-light input:disabled,
         .time-app-light select:disabled {
-          background-color: #e5e7eb !important;
-          color: #64748b !important;
+          background-color: #eef1f6 !important;
+          color: #8a93a3 !important;
         }
 
+        /* ---------- Dark Mode (Marken-Variante) ---------- */
         .time-app-dark {
-          background-color: #020617 !important;
-          color: #e5e7eb !important;
+          background-color: #0d1526 !important;
+          color: #e5e9f2 !important;
         }
 
         .time-app-dark .bg-white,
         .time-app-dark .bg-neutral-50,
         .time-app-dark .bg-neutral-100,
         .time-app-dark .bg-neutral-200 {
-          background-color: #0f172a !important;
-          color: #e5e7eb !important;
+          background-color: #17223c !important;
+          color: #e5e9f2 !important;
         }
 
         .time-app-dark .text-neutral-400,
         .time-app-dark .text-neutral-500,
         .time-app-dark .text-neutral-600,
         .time-app-dark .text-neutral-700 {
-          color: #cbd5e1 !important;
+          color: #aab4c8 !important;
         }
 
         .time-app-dark .border,
         .time-app-dark .border-b {
-          border-color: #334155 !important;
+          border-color: #2b3a5c !important;
         }
+
+        .time-app-dark .bg-blue-50 { background-color: #3a2a14 !important; }
+        .time-app-dark .bg-blue-100 { background-color: #4a3517 !important; }
+        .time-app-dark .text-blue-700 { color: #eaa96a !important; }
 
         .time-app-dark input,
         .time-app-dark select {
-          background-color: #020617 !important;
-          color: #f8fafc !important;
-          border-color: #475569 !important;
+          background-color: #0d1526 !important;
+          color: #f3f6fb !important;
+          border-color: #34446c !important;
         }
 
         .time-app-dark input::placeholder {
-          color: #94a3b8 !important;
+          color: #8794ad !important;
         }
 
         .time-app-dark input:disabled,
         .time-app-dark select:disabled {
-          background-color: #1e293b !important;
-          color: #94a3b8 !important;
+          background-color: #1b2740 !important;
+          color: #8794ad !important;
         }
 
         .time-app-dark .shadow {
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
         }
 
         .time-app-dark .bg-black {
-          background-color: #2563eb !important;
+          background-color: #2c3e6b !important;
         }
 
         .time-app-dark .hover\:bg-neutral-100:hover {
-          background-color: #1e293b !important;
+          background-color: #22314f !important;
         }
       `}</style>
 
