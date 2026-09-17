@@ -88,6 +88,8 @@ export async function POST(req: Request) {
     const email = body.email?.toString().trim().toLowerCase()
     const password = body.password?.toString()
     const role = body.role?.toString() || "employee"
+    const mitarbeiterTyp = body.mitarbeiterTyp?.toString() || "vollzeit"
+    const stundenGrenze = Number(body.stundenGrenze ?? 0)
 
     if (!fullName || !email || !password) {
       return Response.json(
@@ -95,6 +97,20 @@ export async function POST(req: Request) {
           success: false,
           error: "Name, Login-Adresse und Passwort sind erforderlich.",
         },
+        { status: 400 }
+      )
+    }
+
+    if (!["vollzeit", "teilzeit", "minijob"].includes(mitarbeiterTyp)) {
+      return Response.json(
+        { success: false, error: "Ungültiger Mitarbeitertyp." },
+        { status: 400 }
+      )
+    }
+
+    if (!Number.isFinite(stundenGrenze) || stundenGrenze < 0) {
+      return Response.json(
+        { success: false, error: "Ungültige Stundengrenze." },
         { status: 400 }
       )
     }
@@ -176,6 +192,8 @@ export async function POST(req: Request) {
         email,
         role,
         is_active: true,
+        mitarbeiter_typ: mitarbeiterTyp,
+        stunden_grenze: stundenGrenze,
       })
 
     if (insertProfileError) {
@@ -195,6 +213,8 @@ export async function POST(req: Request) {
         email,
         role,
         is_active: true,
+        mitarbeiter_typ: mitarbeiterTyp,
+        stunden_grenze: stundenGrenze,
       },
     })
   } catch (error) {

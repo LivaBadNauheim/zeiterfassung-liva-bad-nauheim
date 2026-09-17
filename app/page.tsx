@@ -10,6 +10,19 @@ type Profile = {
   email: string
   role: "employee" | "admin"
   is_active: boolean
+  mitarbeiter_typ: "vollzeit" | "teilzeit" | "minijob"
+  stunden_grenze: number
+}
+
+// Ab wann die Stundengrenze und die Pausen-Automatik gelten. Muss mit
+// zeit_gilt_ab() in supabase/migrations/0001_mitarbeiter_stunden_grenzen.sql
+// übereinstimmen. Laufende/vergangene Einträge bleiben unangetastet.
+const STUNDEN_GRENZE_GILT_AB = "2026-10-01"
+
+const mitarbeiterTypLabels: Record<Profile["mitarbeiter_typ"], string> = {
+  vollzeit: "Vollzeit",
+  teilzeit: "Teilzeit",
+  minijob: "Minijob",
 }
 
 type TimeEntry = {
@@ -121,6 +134,40 @@ function calculateMinutes(entry: TimeEntry) {
   }
 
   return Math.max(0, end - start - (entry.break_minutes || 0))
+}
+
+// Pausen-Automatik: ab mehr als 6 Stunden Schicht mindestens 30 Minuten Pause,
+// gespiegelt vom DB-Trigger zeit_vor_speichern() (dort ist es der verbindliche
+// Stand; das hier ist nur die sofortige UI-Rückmeldung). Gilt nur für Tage ab
+// STUNDEN_GRENZE_GILT_AB, damit laufende/vergangene Einträge unangetastet
+// bleiben.
+function applyAutoPause(entry: TimeEntry): TimeEntry {
+  if (entry.entry_type !== "work" || !entry.start_time || !entry.end_time) return entry
+  if (entry.work_date < STUNDEN_GRENZE_GILT_AB) return entry
+
+  const start = minutesFromTime(entry.start_time)
+  let end = minutesFromTime(entry.end_time)
+  if (end <= start) end += 24 * 60
+
+  const rawMinutes = end - start
+  if (rawMinutes > 360 && (entry.break_minutes || 0) < 30) {
+    return { ...entry, break_minutes: 30 }
+  }
+
+  return entry
+}
+
+// Übersetzt die vom DB-Trigger geworfene Wochen-/Monatsgrenzen-Meldung in
+// verständlichen Text. Gibt null zurück, wenn die Fehlermeldung nicht von
+// dieser Grenze stammt (dann greift der generische Fehlertext).
+function friendlyLimitError(message: string): string | null {
+  const match = /(Wochengrenze|Monatsgrenze) ueberschritten: ([\d.]+) von ([\d.]+)/.exec(message)
+  if (!match) return null
+
+  const [, art, ist, grenze] = match
+  const einheit = art === "Monatsgrenze" ? "Monatsstunden" : "Wochenstunden"
+
+  return `Das überschreitet die ${einheit}: ${ist} von ${grenze} Stunden. Bitte bei der/dem Vorgesetzten melden.`
 }
 
 function formatHours(minutes: number) {
@@ -367,6 +414,58 @@ function StatCard({
       <p className="text-sm text-neutral-500">{title}</p>
       <p className="mt-2 font-mono text-2xl font-medium tabular-nums">{value}</p>
       {subtitle && <p className="mt-1 text-xs text-neutral-500">{subtitle}</p>}
+    </div>
+  )
+}
+
+// Fortschrittsanzeige für die Stundengrenze des laufenden Zeitraums (Woche
+// bei Vollzeit/Teilzeit, Monat bei Minijob). Ab 90% wird die Anzeige orange
+// ("wird knapp"), bei Erreichen der Grenze erscheint der Hinweis, sich bei
+// der/dem Vorgesetzten zu melden.
+function LimitCard({ profile, periodMinutes }: { profile: Profile; periodMinutes: number }) {
+  const isMinijob = profile.mitarbeiter_typ === "minijob"
+  const periodLabel = isMinijob ? "Monat" : "Woche"
+  const grenze = profile.stunden_grenze
+
+  if (!grenze || grenze <= 0) {
+    return (
+      <div className="rounded-2xl bg-white p-5 shadow">
+        <p className="text-sm text-neutral-500">Stunden {periodLabel}</p>
+        <p className="mt-2 font-mono text-2xl font-medium tabular-nums">{formatHours(periodMinutes)}</p>
+        <p className="mt-1 text-xs text-neutral-500">Keine Grenze hinterlegt</p>
+      </div>
+    )
+  }
+
+  const grenzeMinuten = grenze * 60
+  const anteil = Math.min(1, periodMinutes / grenzeMinuten)
+  const knapp = anteil >= 0.9
+  const erreicht = periodMinutes >= grenzeMinuten
+
+  return (
+    <div className="rounded-2xl bg-white p-5 shadow">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-neutral-500">Stunden {periodLabel}</p>
+        {knapp && (
+          <span className="text-xs font-semibold text-orange">
+            {erreicht ? "Grenze erreicht" : "wird knapp"}
+          </span>
+        )}
+      </div>
+      <p className="mt-2 font-mono text-2xl font-medium tabular-nums">
+        {formatHours(periodMinutes)} <span className="text-sm font-normal text-neutral-400">/ {grenze} Std.</span>
+      </p>
+      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-neutral-100">
+        <div
+          className={knapp ? "h-full rounded-full bg-orange" : "h-full rounded-full bg-green-500"}
+          style={{ width: `${anteil * 100}%` }}
+        />
+      </div>
+      {erreicht && (
+        <p className="mt-2 text-xs font-medium text-red-700">
+          Stundengrenze erreicht. Bitte bei der/dem Vorgesetzten melden.
+        </p>
+      )}
     </div>
   )
 }
@@ -778,7 +877,11 @@ export default function Home() {
   const [createEmail, setCreateEmail] = useState("")
   const [createPassword, setCreatePassword] = useState("")
   const [createRole, setCreateRole] = useState<"employee" | "admin">("employee")
+  const [createMitarbeiterTyp, setCreateMitarbeiterTyp] = useState<Profile["mitarbeiter_typ"]>("vollzeit")
+  const [createStundenGrenze, setCreateStundenGrenze] = useState("")
   const [createUserLoading, setCreateUserLoading] = useState(false)
+
+  const [limitsLoadingId, setLimitsLoadingId] = useState<string | null>(null)
 
   const [resetPasswordUserId, setResetPasswordUserId] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -982,7 +1085,7 @@ export default function Home() {
     setEmployeeEntries((current) => {
       const existing = current.find((entry) => entry.work_date === date)
       const base = existing || getEmptyEntry(profile.id, date)
-      const updated = { ...base, ...changes }
+      const updated = applyAutoPause({ ...base, ...changes })
 
       if (existing) {
         return current.map((entry) => (entry.work_date === date ? updated : entry))
@@ -1000,7 +1103,7 @@ export default function Home() {
     setAdminEntries((current) => {
       const existing = current.find((entry) => entry.work_date === date)
       const base = existing || getEmptyEntry(adminSelectedUserId, date)
-      const updated = { ...base, ...changes }
+      const updated = applyAutoPause({ ...base, ...changes })
 
       if (existing) {
         return current.map((entry) => (entry.work_date === date ? updated : entry))
@@ -1027,7 +1130,7 @@ export default function Home() {
     setEmployeeSavingDate(null)
 
     if (error) {
-      alert("Fehler beim Speichern: " + error.message)
+      alert(friendlyLimitError(error.message) || "Fehler beim Speichern: " + error.message)
       return
     }
 
@@ -1057,7 +1160,7 @@ export default function Home() {
     setAdminSavingDate(null)
 
     if (error) {
-      alert("Fehler beim Speichern: " + error.message)
+      alert(friendlyLimitError(error.message) || "Fehler beim Speichern: " + error.message)
       return
     }
 
@@ -1096,7 +1199,7 @@ export default function Home() {
     setEmployeeSavingAll(false)
 
     if (error) {
-      alert("Fehler beim Speichern: " + error.message)
+      alert(friendlyLimitError(error.message) || "Fehler beim Speichern: " + error.message)
       return
     }
 
@@ -1128,7 +1231,7 @@ export default function Home() {
     setAdminSavingAll(false)
 
     if (error) {
-      alert("Fehler beim Speichern: " + error.message)
+      alert(friendlyLimitError(error.message) || "Fehler beim Speichern: " + error.message)
       return
     }
 
@@ -1182,6 +1285,8 @@ export default function Home() {
         email: normalizedEmail,
         password: createPassword,
         role: createRole,
+        mitarbeiterTyp: createMitarbeiterTyp,
+        stundenGrenze: Number(createStundenGrenze || 0),
       }),
     })
 
@@ -1198,6 +1303,8 @@ export default function Home() {
     setCreateEmail("")
     setCreatePassword("")
     setCreateRole("employee")
+    setCreateMitarbeiterTyp("vollzeit")
+    setCreateStundenGrenze("")
     await fetchProfiles()
   }
 
@@ -1278,6 +1385,43 @@ export default function Home() {
     await fetchProfiles()
   }
 
+  async function updateEmployeeLimits(
+    userId: string,
+    mitarbeiterTyp: Profile["mitarbeiter_typ"],
+    stundenGrenze: number
+  ) {
+    setLimitsLoadingId(userId)
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session) {
+      alert("Keine gültige Session. Bitte neu anmelden.")
+      setLimitsLoadingId(null)
+      return
+    }
+
+    const response = await fetch("/api/admin/set-limits", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ userId, mitarbeiterTyp, stundenGrenze }),
+    })
+
+    const responseData = await response.json()
+    setLimitsLoadingId(null)
+
+    if (!response.ok || !responseData.success) {
+      alert(responseData.error || "Stunden konnten nicht gespeichert werden.")
+      return
+    }
+
+    await fetchProfiles()
+  }
+
   async function exportExcel(userIds: string[], from: string, to: string, filename: string) {
     const { data, error } = await supabase
       .from("time_entries")
@@ -1339,6 +1483,27 @@ export default function Home() {
       .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
   }, [profile, allEntriesUntilToday])
 
+  // Arbeitsstunden des laufenden Kalendermonats (nach deutscher Zeit) bis heute.
+  const employeeMonthToDateSummary = useMemo(() => {
+    if (!profile) return 0
+    const { start } = getMonthRangeFromDate(berlinNow())
+    const today = todayDateString()
+
+    return allEntriesUntilToday
+      .filter(
+        (entry) =>
+          entry.user_id === profile.id &&
+          entry.work_date >= start &&
+          entry.work_date <= today
+      )
+      .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
+  }, [profile, allEntriesUntilToday])
+
+  // Für die Stundengrenzen-Anzeige: Minijobber werden im Monatstakt geprüft,
+  // Vollzeit/Teilzeit im Wochentakt (siehe zeit_vor_speichern() in der Migration).
+  const employeePeriodMinutes =
+    profile?.mitarbeiter_typ === "minijob" ? employeeMonthToDateSummary : employeeWeekSummary
+
   const adminTotalCurrentMonth = useMemo(() => {
     const { start } = getMonthRangeFromDate(berlinNow())
     const today = todayDateString()
@@ -1347,6 +1512,44 @@ export default function Home() {
       .filter((entry) => entry.work_date >= start && entry.work_date <= today)
       .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
   }, [allEntriesUntilToday])
+
+  // Wochen-/Monatsstunden des in "Zeiten bearbeiten" ausgewählten Mitarbeiters
+  // (unabhängig davon, welchen Zeitraum der Admin sich gerade in der Tabelle anschaut).
+  const adminSelectedWeekSummary = useMemo(() => {
+    if (!adminSelectedUserId) return 0
+    const monday = getMonday(berlinNow())
+    const weekStart = formatDate(monday)
+    const weekEnd = formatDate(addDays(monday, 6))
+
+    return allEntriesUntilToday
+      .filter(
+        (entry) =>
+          entry.user_id === adminSelectedUserId &&
+          entry.work_date >= weekStart &&
+          entry.work_date <= weekEnd
+      )
+      .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
+  }, [adminSelectedUserId, allEntriesUntilToday])
+
+  const adminSelectedMonthToDateSummary = useMemo(() => {
+    if (!adminSelectedUserId) return 0
+    const { start } = getMonthRangeFromDate(berlinNow())
+    const today = todayDateString()
+
+    return allEntriesUntilToday
+      .filter(
+        (entry) =>
+          entry.user_id === adminSelectedUserId &&
+          entry.work_date >= start &&
+          entry.work_date <= today
+      )
+      .reduce((sum, entry) => sum + calculateMinutes(entry), 0)
+  }, [adminSelectedUserId, allEntriesUntilToday])
+
+  const adminSelectedPeriodMinutes =
+    selectedAdminProfile?.mitarbeiter_typ === "minijob"
+      ? adminSelectedMonthToDateSummary
+      : adminSelectedWeekSummary
 
   // Zusammenfassung für den aktuell angezeigten Monat des ausgewählten Mitarbeiters.
   const adminMonthLabel = adminWeek.toLocaleDateString("de-DE", {
@@ -1546,7 +1749,7 @@ export default function Home() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
-                <StatCard title="Wochenstunden" value={formatHours(employeeWeekSummary)} subtitle="Aktuelle Woche" />
+                <LimitCard profile={profile} periodMinutes={employeePeriodMinutes} />
                 <StatCard title="Monatsstunden" value={formatHours(employeeMonthSummary.workMinutes)} subtitle={employeeMonthLabel} />
                 <StatCard title="Urlaubstage im Monat" value={employeeMonthSummary.vacationDays} />
                 <StatCard title="Kranktage im Monat" value={employeeMonthSummary.sickDays} />
@@ -1592,7 +1795,7 @@ export default function Home() {
           {profile.role === "employee" && employeeView === "overview" && (
             <>
               <div className="grid gap-4 md:grid-cols-4">
-                <StatCard title="Wochenstunden" value={formatHours(employeeWeekSummary)} subtitle="Aktuelle Woche" />
+                <LimitCard profile={profile} periodMinutes={employeePeriodMinutes} />
                 <StatCard title="Monatsstunden" value={formatHours(employeeMonthSummary.workMinutes)} subtitle={employeeMonthLabel} />
                 <StatCard title="Urlaubstage" value={employeeMonthSummary.vacationDays} />
                 <StatCard title="Kranktage" value={employeeMonthSummary.sickDays} />
@@ -1731,7 +1934,7 @@ export default function Home() {
             <div className="space-y-4">
               <div className="rounded-2xl bg-white p-6 shadow">
                 <h2 className="text-xl font-bold">Zeiten bearbeiten</h2>
-                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div className="mt-4 grid gap-4 lg:grid-cols-3">
                   <div>
                     <label className="text-sm font-medium">Mitarbeiter</label>
                     <select
@@ -1743,6 +1946,11 @@ export default function Home() {
                         <option key={p.id} value={p.id}>{p.full_name}</option>
                       ))}
                     </select>
+                    {selectedAdminProfile && (
+                      <p className="mt-2 text-xs text-neutral-500">
+                        {mitarbeiterTypLabels[selectedAdminProfile.mitarbeiter_typ]}
+                      </p>
+                    )}
                   </div>
 
                   <div className="rounded-xl border bg-neutral-50 p-4">
@@ -1757,12 +1965,11 @@ export default function Home() {
                       <span>Krank: {adminMonthSummary.sickDays} Tage</span>
                       <span>Frei: {adminMonthSummary.dayOffDays} Tage</span>
                     </div>
-                    {selectedAdminProfile && (
-                      <p className="mt-2 text-xs text-neutral-500">
-                        {selectedAdminProfile.full_name}
-                      </p>
-                    )}
                   </div>
+
+                  {selectedAdminProfile && (
+                    <LimitCard profile={selectedAdminProfile} periodMinutes={adminSelectedPeriodMinutes} />
+                  )}
                 </div>
               </div>
 
@@ -1791,7 +1998,7 @@ export default function Home() {
                 Login-Adresse muss dem Schema vorname.nachname@zeiterfassung.local entsprechen.
               </p>
 
-              <div className="mt-4 grid gap-4 xl:grid-cols-5">
+              <div className="mt-4 grid gap-4 xl:grid-cols-4">
                 <div>
                   <label className="text-sm font-medium">Name</label>
                   <input value={createFullName} onChange={(e) => setCreateFullName(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Vorname Nachname" />
@@ -1811,7 +2018,33 @@ export default function Home() {
                     <option value="admin">Admin</option>
                   </select>
                 </div>
-                <div className="flex items-end">
+                <div>
+                  <label className="text-sm font-medium">Mitarbeitertyp</label>
+                  <select
+                    value={createMitarbeiterTyp}
+                    onChange={(e) => setCreateMitarbeiterTyp(e.target.value as Profile["mitarbeiter_typ"])}
+                    className="mt-1 w-full rounded-lg border px-3 py-2"
+                  >
+                    <option value="vollzeit">Vollzeit</option>
+                    <option value="teilzeit">Teilzeit</option>
+                    <option value="minijob">Minijob</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">
+                    {createMitarbeiterTyp === "minijob" ? "Std. / Monat" : "Std. / Woche"}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={createStundenGrenze}
+                    onChange={(e) => setCreateStundenGrenze(e.target.value)}
+                    className="mt-1 w-full rounded-lg border px-3 py-2"
+                    placeholder="0 = keine Grenze"
+                  />
+                </div>
+                <div className="flex items-end xl:col-span-2">
                   <button onClick={createEmployeeUser} disabled={createUserLoading} className="w-full rounded-lg bg-black px-4 py-2 font-medium text-white disabled:opacity-50">
                     {createUserLoading ? "Wird angelegt..." : "Anlegen"}
                   </button>
@@ -1848,12 +2081,14 @@ export default function Home() {
             <div className="rounded-2xl bg-white p-6 shadow">
               <h2 className="text-xl font-bold">Mitarbeiter verwalten</h2>
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[850px] border-collapse text-sm">
+                <table className="w-full min-w-[1100px] border-collapse text-sm">
                   <thead>
                     <tr className="border-b bg-neutral-50 text-left">
                       <th className="p-3">Mitarbeiter</th>
                       <th className="p-3">Login</th>
                       <th className="p-3">Rolle</th>
+                      <th className="p-3">Typ</th>
+                      <th className="p-3">Std.-Grenze</th>
                       <th className="p-3">Status</th>
                       <th className="p-3">Aktion</th>
                     </tr>
@@ -1864,6 +2099,41 @@ export default function Home() {
                         <td className="p-3 font-medium">{p.full_name}</td>
                         <td className="p-3">{p.email}</td>
                         <td className="p-3">{p.role}</td>
+                        <td className="p-3">
+                          <select
+                            defaultValue={p.mitarbeiter_typ}
+                            disabled={limitsLoadingId === p.id}
+                            onChange={(e) =>
+                              updateEmployeeLimits(
+                                p.id,
+                                e.target.value as Profile["mitarbeiter_typ"],
+                                p.stunden_grenze
+                              )
+                            }
+                            className="rounded-lg border px-2 py-1.5"
+                          >
+                            <option value="vollzeit">Vollzeit</option>
+                            <option value="teilzeit">Teilzeit</option>
+                            <option value="minijob">Minijob</option>
+                          </select>
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.5}
+                            defaultValue={p.stunden_grenze}
+                            disabled={limitsLoadingId === p.id}
+                            onBlur={(e) => {
+                              const next = Number(e.target.value)
+                              if (Number.isFinite(next) && next !== p.stunden_grenze) {
+                                updateEmployeeLimits(p.id, p.mitarbeiter_typ, next)
+                              }
+                            }}
+                            className="w-24 rounded-lg border px-2 py-1.5"
+                            title={p.mitarbeiter_typ === "minijob" ? "Std. / Monat" : "Std. / Woche"}
+                          />
+                        </td>
                         <td className="p-3">{p.is_active ? "Aktiv" : "Inaktiv"}</td>
                         <td className="p-3">
                           <button
