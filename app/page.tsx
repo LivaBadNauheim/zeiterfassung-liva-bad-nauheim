@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
+import { AdminDienstplan, MitarbeiterDienstplan } from "@/app/dienstplan/Dienstplan"
 
 type Profile = {
   id: string
@@ -36,9 +37,10 @@ type TimeEntry = {
   note: string | null
 }
 
-type EmployeeView = "dashboard" | "time" | "overview" | "export"
+type EmployeeView = "dashboard" | "dienstplan" | "time" | "overview" | "export"
 type AdminView =
   | "dashboard"
+  | "dienstplan"
   | "edit-times"
   | "create-user"
   | "reset-password"
@@ -487,6 +489,7 @@ function Sidebar({
 }) {
   const adminItems: { key: AdminView; label: string }[] = [
     { key: "dashboard", label: "Dashboard" },
+    { key: "dienstplan", label: "Dienstplan" },
     { key: "edit-times", label: "Zeiten bearbeiten" },
     { key: "create-user", label: "Mitarbeiter anlegen" },
     { key: "reset-password", label: "Passwort zurücksetzen" },
@@ -496,6 +499,7 @@ function Sidebar({
 
   const employeeItems: { key: EmployeeView; label: string }[] = [
     { key: "dashboard", label: "Dashboard" },
+    { key: "dienstplan", label: "Dienstplan" },
     { key: "time", label: "Zeiten erfassen" },
     { key: "overview", label: "Meine Übersicht" },
     { key: "export", label: "Export" },
@@ -1739,6 +1743,9 @@ export default function Home() {
         />
 
         <section className="flex-1 space-y-6">
+          {profile.role === "employee" && employeeView === "dienstplan" && <MitarbeiterDienstplan />}
+          {profile.role === "admin" && adminView === "dienstplan" && <AdminDienstplan />}
+
           {profile.role === "employee" && employeeView === "dashboard" && (
             <>
               <div className="rounded-2xl bg-white p-6 shadow">
