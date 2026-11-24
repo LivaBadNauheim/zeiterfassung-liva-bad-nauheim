@@ -71,7 +71,7 @@ export async function GET(req: Request) {
     if (me.role === "admin") {
       const woche = montagVon(url.searchParams.get("woche") || heute)
       const bis = addTage(woche, 6)
-      const [profile, zuordnung, schichten, verf, wocheRow, offene] = await Promise.all([
+      const [profile, zuordnung, schichten, verf, wocheRow, offene, zeiten] = await Promise.all([
         db.from("profiles").select("id,full_name,role,mitarbeiter_typ,stunden_grenze").eq("is_active", true).order("full_name"),
         db.from("mitarbeiter_bereiche").select("user_id,bereich_id"),
         // Vortag/Folgetag fuer Ruhezeit-Pruefung, Monat fuer Minijob-Grenze
@@ -79,6 +79,8 @@ export async function GET(req: Request) {
         db.from("verfuegbarkeiten").select("user_id,datum,verfuegbar,notiz").gte("datum", woche).lte("datum", bis),
         db.from("dienstplan_wochen").select("*").eq("woche_start", woche).maybeSingle(),
         db.from("schichten").select(SCHICHT_FELDER).eq("offen", true).gte("datum", heute).order("datum"),
+        // Fuer den Abgleich Plan <-> Zeiterfassung
+        db.from("time_entries").select("user_id,work_date,entry_type,start_time,end_time,break_minutes").gte("work_date", woche).lte("work_date", bis),
       ])
       const offeneIds = (offene.data ?? []).map((s) => s.id)
       const { data: interessen } = offeneIds.length
@@ -98,12 +100,14 @@ export async function GET(req: Request) {
         wocheStatus: wocheRow.data,
         offene: offene.data,
         interessen,
+        zeiten: zeiten.data,
       })
     }
 
     // ---- Mitarbeiter
-    const ab = montagVon(heute)
-    const bis = addTage(ab, 27)
+    // 5 Wochen zurueck (Vorausfuellen der Zeiterfassung) bis 4 Wochen voraus
+    const ab = addTage(montagVon(heute), -35)
+    const bis = addTage(montagVon(heute), 27)
     const verfWoche = offeneVerfuegbarkeitsWoche(berlinJetzt(), e)
     const [wochen, meine, offene, meineInteressen, verf, zuordnung] = await Promise.all([
       db.from("dienstplan_wochen").select("woche_start").not("freigegeben_am", "is", null).gte("woche_start", ab).lte("woche_start", bis),
