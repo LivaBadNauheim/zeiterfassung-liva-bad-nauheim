@@ -34,6 +34,7 @@ type Verf = { user_id?: string; datum: string; verfuegbar: boolean; notiz: strin
 type Einstellungen = { frist_wochentag: number; frist_uhrzeit: string; erinnerung_stunden: number; schicht_erinnerung_stunden: number }
 
 const TAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+const TYP_LABEL: Record<string, string> = { vollzeit: "Vollzeit", teilzeit: "Teilzeit", minijob: "Minijob" }
 const TAGE_LANG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
 async function api(method: "GET" | "POST", query: string, body?: unknown) {
@@ -504,104 +505,191 @@ export function AdminDienstplan() {
           )}
 
           {/* ---- Wochenraster */}
-          <div className={`${karte} overflow-x-auto p-3 md:p-6`}>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap gap-3 text-xs text-neutral-500">
-                {bereiche.map((b) => (
-                  <span key={b.id} className="flex items-center gap-1">
-                    <span className="inline-block h-3 w-3 rounded" style={{ background: b.farbe }} /> {b.name}
-                  </span>
-                ))}
-                <span>🟢 kann · 🔴 kann nicht · ⚪ nichts eingetragen</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className={knopf}
-                  disabled={busy || inWoche.length > 0}
-                  title={inWoche.length > 0 ? "Nur für leere Wochen" : ""}
-                  onClick={() => aktion({ aktion: "woche_kopieren", von: addTage(woche, -7), nach: woche }, "Vorwoche übernommen.")}
-                >
-                  Vorwoche kopieren
-                </button>
-                <button className={knopf} onClick={exportieren}>Excel</button>
-                <button
-                  className={knopfDunkel}
-                  disabled={busy}
-                  onClick={() => {
-                    const txt = freigegeben
-                      ? "Plan erneut freigeben? Alle bekommen eine Push-Nachricht „Dienstplan aktualisiert“."
-                      : `Dienstplan KW ${kw(woche)} freigeben? Alle Mitarbeitenden bekommen eine Push-Nachricht mit ihren Schichten.`
-                    if (confirm(txt)) aktion({ aktion: "woche_freigeben", woche }, "Freigegeben – alle wurden benachrichtigt 📣")
-                  }}
-                >
-                  {freigegeben ? "Erneut freigeben" : "📣 Freigeben & alle benachrichtigen"}
-                </button>
-              </div>
+          <div className={`${karte} p-3 md:p-5`}>
+            <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+              <button
+                className={knopf}
+                disabled={busy || inWoche.length > 0}
+                title={inWoche.length > 0 ? "Nur für leere Wochen" : ""}
+                onClick={() => aktion({ aktion: "woche_kopieren", von: addTage(woche, -7), nach: woche }, "Vorwoche übernommen.")}
+              >
+                Vorwoche kopieren
+              </button>
+              <button className={knopf} onClick={exportieren}>Excel</button>
+              <button
+                className={knopfDunkel}
+                disabled={busy}
+                onClick={() => {
+                  const txt = freigegeben
+                    ? "Plan erneut freigeben? Alle bekommen eine Push-Nachricht „Dienstplan aktualisiert“."
+                    : `Dienstplan KW ${kw(woche)} freigeben? Alle Mitarbeitenden bekommen eine Push-Nachricht mit ihren Schichten.`
+                  if (confirm(txt)) aktion({ aktion: "woche_freigeben", woche }, "Freigegeben – alle wurden benachrichtigt 📣")
+                }}
+              >
+                {freigegeben ? "Erneut freigeben" : "📣 Freigeben & benachrichtigen"}
+              </button>
             </div>
 
-            <table className="w-full min-w-[900px] border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="w-44 p-2 text-left">Mitarbeiter</th>
-                  {tage.map((t) => (
-                    <th key={t} className="p-2 text-left">{datumText(t)}</th>
-                  ))}
-                  <th className="p-2 text-right">Std.</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-t bg-orange-soft/40">
-                  <td className="p-2 font-semibold">Unbesetzt</td>
-                  {tage.map((t) => (
-                    <td key={t} className="p-1 align-top">
-                      {unbesetzt.filter((s) => s.datum === t).map((s) => (
-                        <SchichtChip key={s.id} s={s} b={bereichVon(s.bereich_id)} onClick={() => setDialog({ schicht: s })} />
-                      ))}
-                      <button className="w-full rounded p-1 text-xs text-neutral-400 hover:bg-neutral-100" onClick={() => setDialog({ schicht: { datum: t, mitarbeiter_id: null } })}>
-                        +
-                      </button>
+            <div className="overflow-x-auto rounded-xl border">
+              <table className="w-full min-w-[960px] table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-[210px]" />
+                  {tage.map((t) => <col key={t} />)}
+                  <col className="w-[84px]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-neutral-50">
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-neutral-500">Mitarbeiter</th>
+                    {tage.map((t) => {
+                      const heute = t === berlinJetzt().datum
+                      return (
+                        <th key={t} className={`px-1 py-3 text-center ${heute ? "bg-orange-soft/60" : ""}`}>
+                          <p className={`font-semibold ${heute ? "text-orange-strong" : ""}`}>{TAGE[wochentag(t) - 1]}</p>
+                          <p className="text-xs font-normal text-neutral-500">{t.slice(8, 10)}.{t.slice(5, 7)}.</p>
+                        </th>
+                      )
+                    })}
+                    <th className="px-3 py-3 text-right text-xs font-medium uppercase tracking-wide text-neutral-500">Std.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Besetzung je Tag */}
+                  <tr className="border-t bg-orange-soft/30">
+                    <td className="px-4 py-2">
+                      <p className="font-semibold">Besetzung</p>
+                      <p className="text-xs text-neutral-500">Schichten / Stunden</p>
                     </td>
-                  ))}
-                  <td />
-                </tr>
-                {personen.map((p) => {
-                  const min = wochenMin(p.id)
-                  const zuViel = p.mitarbeiter_typ !== "minijob" && p.stunden_grenze > 0 && min > p.stunden_grenze * 60
-                  return (
-                    <tr key={p.id} className="border-t">
-                      <td className="p-2">
-                        <p className="font-medium">{p.full_name}</p>
-                        <p className="text-[11px] text-neutral-500">
-                          {p.mitarbeiter_typ}
-                          {p.stunden_grenze > 0 ? ` · ${p.stunden_grenze} Std./${p.mitarbeiter_typ === "minijob" ? "Monat" : "Woche"}` : ""}
-                        </p>
+                    {tage.map((t) => {
+                      const tag = inWoche.filter((s) => s.datum === t)
+                      const besetzt = tag.filter((s) => s.mitarbeiter_id)
+                      const std = besetzt.reduce((m, s) => m + arbeitsMinuten(s), 0) / 60
+                      const offen = tag.length - besetzt.length
+                      return (
+                        <td key={t} className="px-1 py-2 text-center text-xs">
+                          {tag.length === 0 ? (
+                            <span className="text-neutral-400">—</span>
+                          ) : (
+                            <>
+                              <p className="font-medium">{besetzt.length} {besetzt.length === 1 ? "Schicht" : "Schichten"} · {std.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Std.</p>
+                              <div className="mt-1 flex justify-center gap-1">
+                                {bereiche.map((b) => {
+                                  const n = besetzt.filter((s) => s.bereich_id === b.id).length
+                                  return n ? (
+                                    <span key={b.id} className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ background: b.farbe }}>
+                                      {b.name.charAt(0)} {n}
+                                    </span>
+                                  ) : null
+                                })}
+                              </div>
+                              {offen > 0 && (
+                                <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">⚠ {offen} unbesetzt</span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                      )
+                    })}
+                    <td />
+                  </tr>
+
+                  {/* Unbesetzte Schichten */}
+                  <tr className="border-t">
+                    <td className="px-4 py-2">
+                      <p className="font-semibold text-neutral-700">Unbesetzt</p>
+                      <p className="text-xs text-neutral-500">ohne Person / offen</p>
+                    </td>
+                    {tage.map((t) => (
+                      <td key={t} className="p-1 align-top">
+                        {unbesetzt.filter((s) => s.datum === t).map((s) => (
+                          <SchichtChip key={s.id} s={s} b={bereichVon(s.bereich_id)} onClick={() => setDialog({ schicht: s })} />
+                        ))}
+                        <button
+                          className="flex h-9 w-full items-center justify-center rounded-lg border border-dashed text-xs text-neutral-400 hover:border-neutral-400 hover:text-neutral-600"
+                          onClick={() => setDialog({ schicht: { datum: t, mitarbeiter_id: null } })}
+                        >
+                          + Schicht
+                        </button>
                       </td>
-                      {tage.map((t) => {
-                        const v = verfMap.get(`${p.id}|${t}`)
-                        return (
-                          <td key={t} className="group p-1 align-top">
-                            <div className="text-[10px]">{v ? (v.verfuegbar ? "🟢" : "🔴") : "⚪"}</div>
-                            {inWoche.filter((s) => s.mitarbeiter_id === p.id && s.datum === t).map((s) => (
-                              <SchichtChip key={s.id} s={s} b={bereichVon(s.bereich_id)} onClick={() => setDialog({ schicht: s })} />
-                            ))}
-                            <button
-                              className="w-full rounded p-1 text-xs text-neutral-300 hover:bg-neutral-100 group-hover:text-neutral-500"
-                              onClick={() => setDialog({ schicht: { datum: t, mitarbeiter_id: p.id } })}
-                            >
-                              +
-                            </button>
-                          </td>
-                        )
-                      })}
-                      <td className={`p-2 text-right font-mono ${zuViel ? "font-bold text-red-600" : ""}`}>{(min / 60).toFixed(1)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                    ))}
+                    <td />
+                  </tr>
+
+                  {personen.map((p) => {
+                    const min = wochenMin(p.id)
+                    const wochenGrenze = p.mitarbeiter_typ !== "minijob" && p.stunden_grenze > 0 ? p.stunden_grenze : 0
+                    const zuViel = wochenGrenze > 0 && min > wochenGrenze * 60
+                    return (
+                      <tr key={p.id} className="border-t">
+                        <td className="px-4 py-2">
+                          <div className="flex items-center gap-3">
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-orange-soft text-sm font-semibold text-orange-strong">
+                              {p.full_name.trim().charAt(0).toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{p.full_name}</p>
+                              <p className="truncate text-xs text-neutral-500">
+                                {TYP_LABEL[p.mitarbeiter_typ] ?? p.mitarbeiter_typ}
+                                {p.stunden_grenze > 0 ? ` · ${p.stunden_grenze} Std./${p.mitarbeiter_typ === "minijob" ? "Monat" : "Woche"}` : ""}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        {tage.map((t) => {
+                          const v = verfMap.get(`${p.id}|${t}`)
+                          const eigene = inWoche.filter((s) => s.mitarbeiter_id === p.id && s.datum === t)
+                          const neu = () => setDialog({ schicht: { datum: t, mitarbeiter_id: p.id } })
+                          return (
+                            <td key={t} className="p-1 align-middle">
+                              {eigene.map((s) => (
+                                <SchichtChip key={s.id} s={s} b={bereichVon(s.bereich_id)} onClick={() => setDialog({ schicht: s })} />
+                              ))}
+                              {eigene.length === 0 ? (
+                                <button
+                                  onClick={neu}
+                                  title="Schicht anlegen"
+                                  className={`flex h-9 w-full items-center justify-center rounded-lg text-xs font-medium transition ${
+                                    v?.verfuegbar === false
+                                      ? "bg-red-50 text-red-600 hover:bg-red-100"
+                                      : v?.verfuegbar
+                                        ? "bg-green-50 text-green-700 hover:bg-green-100"
+                                        : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+                                  }`}
+                                >
+                                  {v?.verfuegbar === false ? "Kann nicht" : v?.verfuegbar ? "Kann ✓" : "Frei"}
+                                </button>
+                              ) : (
+                                <button onClick={neu} className="w-full rounded text-[11px] text-neutral-400 hover:text-neutral-700">
+                                  + weitere
+                                </button>
+                              )}
+                            </td>
+                          )
+                        })}
+                        <td className={`px-3 py-2 text-right ${zuViel ? "font-bold text-red-600" : ""}`}>
+                          <p className="font-semibold">{(min / 60).toLocaleString("de-DE", { maximumFractionDigits: 1 })}</p>
+                          {wochenGrenze > 0 && <p className="text-[11px] text-neutral-400">von {wochenGrenze}</p>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-neutral-600">
+              {bereiche.map((b) => (
+                <span key={b.id} className="flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: b.farbe }} /> {b.name}
+                </span>
+              ))}
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-neutral-300" /> Frei (nichts eingetragen)</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" /> Kann</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" /> Kann nicht</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-pink-300" /> Krank</span>
+            </div>
             {fehlendeVerf.length > 0 && (
-              <p className="mt-3 text-xs text-neutral-500">
-                Ohne Verfügbarkeit für diese Woche: {fehlendeVerf.map((p) => p.full_name).join(", ")}
+              <p className="mt-3 rounded-lg bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+                <b>Noch keine Verfügbarkeit ({fehlendeVerf.length}):</b> {fehlendeVerf.map((p) => p.full_name).join(", ")}
               </p>
             )}
           </div>
@@ -635,13 +723,19 @@ function SchichtChip({ s, b, onClick }: { s: Schicht; b?: Bereich; onClick: () =
   return (
     <button
       onClick={onClick}
-      className="mb-1 block w-full rounded-md px-2 py-1 text-left text-xs font-medium text-white"
-      style={{ background: b?.farbe ?? "#6b7280" }}
+      className={`mb-1 block w-full rounded-lg border-l-4 px-2 py-1.5 text-left transition hover:brightness-95 ${
+        s.ausfall_grund === "krank" && !s.mitarbeiter_id ? "bg-pink-50" : ""
+      }`}
+      style={{ borderColor: b?.farbe ?? "#6b7280", background: s.ausfall_grund === "krank" && !s.mitarbeiter_id ? undefined : `${b?.farbe ?? "#6b7280"}1f` }}
       title={s.notiz ?? ""}
     >
-      {zeitText(s)}
-      {s.offen && " · offen"}
-      {s.ausfall_grund === "krank" && " · 🤒"}
+      <span className="block text-xs font-semibold text-[#1b2536]">{zeitText(s)}</span>
+      <span className="block truncate text-[10px] text-neutral-600">
+        {b?.name ?? "–"}
+        {s.offen && " · angeboten"}
+        {s.ausfall_grund === "krank" && !s.mitarbeiter_id && " · 🤒 krank"}
+        {s.notiz && " · 📝"}
+      </span>
     </button>
   )
 }
@@ -716,20 +810,20 @@ function SchichtDialog({
   }, [s, personen, alle, verfMap, zuordnung, interessen])
 
   const gewaehlt = kandidaten.find((k) => k.p.id === s.mitarbeiter_id)
-  const feld = "mt-1 w-full rounded-lg border px-3 py-2"
+  const feld = "mt-1 block h-11 w-full min-w-0 appearance-none rounded-lg border bg-white px-3 text-base"
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-2 md:items-center" onClick={onClose}>
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto overflow-x-hidden rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-bold">
           {s.id ? "Schicht bearbeiten" : "Neue Schicht"} · {TAGE_LANG[wochentag(s.datum) - 1]}, {datumText(s.datum)}
         </h3>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <label className="text-sm">Beginn<input type="time" className={feld} value={s.beginn} onChange={(e) => setS({ ...s, beginn: e.target.value })} /></label>
-          <label className="text-sm">Ende<input type="time" className={feld} value={s.ende} onChange={(e) => setS({ ...s, ende: e.target.value })} /></label>
-          <label className="text-sm">Datum<input type="date" className={feld} value={s.datum} onChange={(e) => setS({ ...s, datum: e.target.value })} /></label>
-          <label className="text-sm">Bereich
-            <select className={feld} value={s.bereich_id} onChange={(e) => setS({ ...s, bereich_id: e.target.value })}>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Beginn<input type="time" className={feld} value={s.beginn} onChange={(e) => setS({ ...s, beginn: e.target.value })} /></label>
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Ende<input type="time" className={feld} value={s.ende} onChange={(e) => setS({ ...s, ende: e.target.value })} /></label>
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Datum<input type="date" className={feld} value={s.datum} onChange={(e) => setS({ ...s, datum: e.target.value })} /></label>
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Bereich
+            <select className={feld.replace("appearance-none ", "")} value={s.bereich_id} onChange={(e) => setS({ ...s, bereich_id: e.target.value })}>
               <option value="">–</option>
               {bereiche.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
@@ -737,11 +831,12 @@ function SchichtDialog({
         </div>
         {s.ende <= s.beginn && <p className="mt-1 text-xs text-neutral-500">Endet am Folgetag (über Mitternacht).</p>}
 
-        <p className="mt-4 text-sm font-medium">Person (sortiert: Interessenten, passend, wenigste Stunden)</p>
-        <div className="mt-1 max-h-60 space-y-1 overflow-y-auto rounded-lg border p-1">
+        <p className="mt-5 text-sm font-medium text-neutral-600">Person</p>
+        <p className="text-xs text-neutral-400">Sortiert: Interessenten, passende Personen, wenigste Stunden</p>
+        <div className="mt-2 max-h-72 space-y-1 overflow-y-auto rounded-xl border p-1">
           <button
             onClick={() => setS({ ...s, mitarbeiter_id: "" })}
-            className={`w-full rounded-md px-2 py-2 text-left text-sm ${!s.mitarbeiter_id ? "bg-black text-white" : "hover:bg-neutral-100"}`}
+            className={`w-full rounded-lg px-3 py-2.5 text-left text-sm ${!s.mitarbeiter_id ? "bg-navy text-white" : "hover:bg-neutral-100"}`}
           >
             — niemand (unbesetzt)
           </button>
@@ -749,18 +844,36 @@ function SchichtDialog({
             <button
               key={k.p.id}
               onClick={() => setS({ ...s, mitarbeiter_id: k.p.id, offen: false })}
-              className={`flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm ${
-                s.mitarbeiter_id === k.p.id ? "bg-black text-white" : k.gesperrt ? "text-neutral-400 hover:bg-neutral-50" : "hover:bg-neutral-100"
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${
+                s.mitarbeiter_id === k.p.id ? "bg-navy text-white" : k.gesperrt ? "opacity-50 hover:bg-neutral-50" : "hover:bg-neutral-100"
               }`}
             >
-              <span>
-                {k.interesse && "🙋 "}
-                {k.p.full_name}
-                {!k.imBereich && <span className="text-xs"> (anderer Bereich)</span>}
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-orange-soft text-xs font-semibold text-orange-strong">
+                {k.p.full_name.trim().charAt(0).toUpperCase()}
               </span>
-              <span className="text-xs">
-                {k.status} · {formatStunden(k.wochenMin)}
-                {k.p.stunden_grenze > 0 && ` / ${k.p.stunden_grenze}${k.p.mitarbeiter_typ === "minijob" ? " Mon." : ""}`}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">
+                  {k.interesse && "🙋 "}
+                  {k.p.full_name}
+                </span>
+                <span className={`block text-xs ${s.mitarbeiter_id === k.p.id ? "text-white/70" : "text-neutral-500"}`}>
+                  {formatStunden(k.wochenMin)} diese Woche
+                  {k.p.stunden_grenze > 0 && ` · Grenze ${k.p.stunden_grenze} Std./${k.p.mitarbeiter_typ === "minijob" ? "Monat" : "Woche"}`}
+                  {!k.imBereich && " · anderer Bereich"}
+                </span>
+              </span>
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                  k.status === "kann nicht" || k.status === "Konflikt"
+                    ? "bg-red-100 text-red-700"
+                    : k.status === "schon eingeteilt"
+                      ? "bg-amber-100 text-amber-800"
+                      : k.status === "frei ✔"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-neutral-100 text-neutral-600"
+                }`}
+              >
+                {k.status === "frei ✔" ? "kann ✓" : k.status}
               </span>
             </button>
           ))}
@@ -778,11 +891,11 @@ function SchichtDialog({
             Dem Team zur Übernahme anbieten (Push an alle im Bereich)
           </label>
         )}
-        <label className="mt-3 block text-sm">Notiz
+        <label className="mt-4 block text-sm font-medium text-neutral-600">Notiz
           <input className={feld} maxLength={280} value={s.notiz} onChange={(e) => setS({ ...s, notiz: e.target.value })} />
         </label>
 
-        <div className="mt-5 flex flex-wrap justify-between gap-2">
+        <div className="mt-6 flex flex-wrap justify-between gap-2 border-t pt-4">
           <div>{s.id && <button className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700" disabled={busy} onClick={() => onDelete(s.id!)}>Löschen</button>}</div>
           <div className="flex gap-2">
             <button className={knopf} onClick={onClose}>Abbrechen</button>
@@ -817,7 +930,7 @@ function EinstellungenAdmin({
 }) {
   const [e, setE] = useState<Einstellungen>({ ...d.einstellungen, frist_uhrzeit: hhmm(d.einstellungen.frist_uhrzeit) })
   const zuordnung: { user_id: string; bereich_id: string }[] = d.zuordnung
-  const feld = "mt-1 w-full rounded-lg border px-3 py-2"
+  const feld = "mt-1 block h-11 w-full min-w-0 appearance-none rounded-lg border bg-white px-3 text-base"
 
   return (
     <>
@@ -827,18 +940,18 @@ function EinstellungenAdmin({
           Bis wann müssen Mitarbeitende ihre Verfügbarkeit für die <b>kommende Woche</b> eintragen?
         </p>
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <label className="text-sm">Wochentag
-            <select className={feld} value={e.frist_wochentag} onChange={(x) => setE({ ...e, frist_wochentag: Number(x.target.value) })}>
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Wochentag
+            <select className={feld.replace("appearance-none ", "")} value={e.frist_wochentag} onChange={(x) => setE({ ...e, frist_wochentag: Number(x.target.value) })}>
               {TAGE_LANG.map((t, i) => <option key={t} value={i + 1}>{t}</option>)}
             </select>
           </label>
-          <label className="text-sm">Uhrzeit
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Uhrzeit
             <input type="time" className={feld} value={e.frist_uhrzeit} onChange={(x) => setE({ ...e, frist_uhrzeit: x.target.value })} />
           </label>
-          <label className="text-sm">Erinnerung vor Frist (Std.)
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Erinnerung vor Frist (Std.)
             <input type="number" min={1} max={168} className={feld} value={e.erinnerung_stunden} onChange={(x) => setE({ ...e, erinnerung_stunden: Number(x.target.value) })} />
           </label>
-          <label className="text-sm">Schicht-Erinnerung (Std. vorher, 0 = aus)
+          <label className="block min-w-0 text-sm font-medium text-neutral-600">Schicht-Erinnerung (Std. vorher, 0 = aus)
             <input type="number" min={0} max={168} className={feld} value={e.schicht_erinnerung_stunden} onChange={(x) => setE({ ...e, schicht_erinnerung_stunden: Number(x.target.value) })} />
           </label>
         </div>
