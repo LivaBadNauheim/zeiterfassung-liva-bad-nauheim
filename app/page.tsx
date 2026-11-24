@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
-import { AdminDienstplan, MitarbeiterDienstplan } from "@/app/dienstplan/Dienstplan"
+import { AdminDienstplan, MitarbeiterDienstplan, ladeGeplanteSchichten, type Geplant } from "@/app/dienstplan/Dienstplan"
 
 type Profile = {
   id: string
@@ -568,6 +568,7 @@ function TimeEntryTable({
   onSaveAll,
   isSavingAll,
   title,
+  geplant,
 }: {
   userId: string
   anchorDate: Date
@@ -582,6 +583,7 @@ function TimeEntryTable({
   onSaveAll: () => void
   isSavingAll: boolean
   title: string
+  geplant?: Geplant
 }) {
   const days = useMemo(() => {
     return getPeriodDays(anchorDate, periodMode)
@@ -614,6 +616,17 @@ function TimeEntryTable({
     0
   )
   const dirtyInPeriod = visibleDates.filter((date) => dirtyDates.has(date)).length
+
+  // Geplante Schichten (Dienstplan), die noch nicht erfasst sind -> Vorausfuellen
+  const uebernehmbar = (date: string) => {
+    const e = getEntryForDate(date)
+    return !!geplant?.[date] && !e.id && !dirtyDates.has(date) && date <= today
+  }
+  const uebernehmen = (date: string) => {
+    const g = geplant?.[date]
+    if (g) onChangeEntry(date, { entry_type: "work", start_time: g.beginn, end_time: g.ende })
+  }
+  const offenGeplant = visibleDates.filter(uebernehmbar)
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
@@ -674,6 +687,20 @@ function TimeEntryTable({
           </button>
         </div>
       </div>
+
+      {offenGeplant.length > 0 && (
+        <div className="mb-4 flex flex-col items-start justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 sm:flex-row sm:items-center">
+          <span className="text-sm font-medium text-blue-800">
+            📅 {offenGeplant.length} geplante Schicht{offenGeplant.length === 1 ? "" : "en"} noch nicht erfasst. Übernehmen, prüfen und speichern.
+          </span>
+          <button
+            onClick={() => offenGeplant.forEach(uebernehmen)}
+            className="rounded-lg bg-navy px-4 py-2 text-sm font-semibold text-white shadow-sm"
+          >
+            Geplante Zeiten übernehmen
+          </button>
+        </div>
+      )}
 
       {dirtyInPeriod > 0 && (
         <div className="mb-4 flex flex-col items-start justify-between gap-2 rounded-xl border border-yellow-200 bg-yellow-50 p-3 sm:flex-row sm:items-center">
@@ -740,6 +767,16 @@ function TimeEntryTable({
                       <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                         Heute
                       </span>
+                    )}
+                    {geplant?.[date] && (
+                      <div className="mt-1 flex items-center gap-2 text-xs font-normal text-neutral-500">
+                        <span>📅 Geplant {geplant[date].text}</span>
+                        {uebernehmbar(date) && (
+                          <button onClick={() => uebernehmen(date)} className="rounded-md border border-blue-200 px-2 py-0.5 font-medium text-blue-700 hover:bg-blue-50">
+                            Übernehmen
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
 
@@ -908,6 +945,13 @@ export default function Home() {
       document.documentElement.classList.add("dark")
     }
   }, [])
+
+  const [geplant, setGeplant] = useState<Geplant>({})
+  useEffect(() => {
+    if (profile?.role === "employee" && employeeView === "time") {
+      ladeGeplanteSchichten().then(setGeplant).catch(() => {})
+    }
+  }, [profile, employeeView])
 
   useEffect(() => {
     if (profile) {
@@ -1796,6 +1840,7 @@ export default function Home() {
               onSaveAll={saveAllEmployeeEntries}
               isSavingAll={employeeSavingAll}
               title="Zeiten erfassen"
+              geplant={geplant}
             />
           )}
 

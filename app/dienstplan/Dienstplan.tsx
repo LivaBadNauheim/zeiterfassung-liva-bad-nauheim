@@ -74,6 +74,25 @@ function Meldung({ text, fehler }: { text: string; fehler?: boolean }) {
   )
 }
 
+// ---------------------------------------------------------------- Zeiterfassung
+
+export type Geplant = Record<string, { beginn: string; ende: string; text: string }>
+
+/** Freigegebene eigene Schichten je Tag (fuer das Vorausfuellen der Zeiterfassung). */
+export async function ladeGeplanteSchichten(): Promise<Geplant> {
+  const j = await api("GET", "")
+  const out: Geplant = {}
+  for (const s of (j.meineSchichten ?? []) as Schicht[]) {
+    const alt = out[s.datum]
+    if (!alt) out[s.datum] = { beginn: hhmm(s.beginn), ende: hhmm(s.ende), text: zeitText(s) }
+    else {
+      // geteilter Dienst: fruehester Beginn bis spaetestes Ende
+      out[s.datum] = { beginn: alt.beginn, ende: hhmm(s.ende), text: `${alt.text}, ${zeitText(s)}` }
+    }
+  }
+  return out
+}
+
 // ---------------------------------------------------------------- Push
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -504,6 +523,8 @@ export function AdminDienstplan() {
             </div>
           )}
 
+          <Abgleich d={d} personen={personen} tage={tage} inWoche={inWoche} />
+
           {/* ---- Wochenraster */}
           <div className={`${karte} p-3 md:p-5`}>
             <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
@@ -717,6 +738,94 @@ export function AdminDienstplan() {
       )}
     </div>
   )
+}
+
+// ---------------------------------------------------------------- Abgleich Plan <-> Zeiterfassung
+
+type Zeit = { user_id: string; work_date: string; entry_type: string; start_time: string | null; end_time: string | null; break_minutes: number }
+const TYP_ZEIT: Record<string, string> = { vacation: "Urlaub", sick: "Krank", day_off: "Frei", holiday: "Feiertag" }
+
+function Abgleich({ d, personen, tage, inWoche }: { d: any; personen: Person[]; tage: string[]; inWoche: Schicht[] }) {
+  const heute = berlinJetzt().datum
+  const zeiten: Zeit[] = d.zeiten ?? []
+  const vergangen = tage.filter((t) => t <= heute)
+  if (!vergangen.length) return null
+
+  type Zeile = { p: Person; datum: string; plan: string; ist: string; art: "fehlt" | "abweichung" | "ohne-plan" | "anders" }
+  const zeilen: Zeile[] = []
+  for (const p of personen) {
+    for (const t of vergangen) {
+      const plan = inWoche.filter((s) => s.mitarbeiter_id === p.id && s.datum === t)
+      const z = zeiten.find((x) => x.user_id === p.id && x.work_date === t)
+      const planMin = plan.reduce((m, s) => m + dauerMinutenLokal(s.beginn, s.ende), 0)
+      const planText = plan.map(zeitText).join(", ")
+      const arbeit = z?.entry_type === "work" && z.start_time && z.end_time
+      const istMin = arbeit ? dauerMinutenLokal(z!.start_time!, z!.end_time!) : 0
+      const istText = arbeit ? `${hhmm(z!.start_time!)}–${hhmm(z!.end_time!)}` : z ? TYP_ZEIT[z.entry_type] ?? "–" : "–"
+      if (plan.length && !z) {
+        // heute erst nach Schichtende als fehlend melden
+        const ende = plan.map((s) => hhmm(s.ende)).sort().pop()!
+        if (t === heute && berlinJetzt().zeit < ende && ende > hhmm(plan[0].beginn)) continue
+        zeilen.push({ p, datum: t, plan: planText, ist: "nicht eingetragen", art: "fehlt" })
+      } else if (plan.length && !arbeit) {
+        zeilen.push({ p, datum: t, plan: planText, ist: istText, art: "anders" })
+      } else if (plan.length && Math.abs(istMin - planMin) >= 30) {
+        const diff = istMin - planMin
+        zeilen.push({ p, datum: t, plan: planText, ist: `${istText} (${diff > 0 ? "+" : "−"}${formatStunden(Math.abs(diff))})`, art: "abweichung" })
+      } else if (!plan.length && arbeit) {
+        zeilen.push({ p, datum: t, plan: "–", ist: istText, art: "ohne-plan" })
+      }
+    }
+  }
+
+  const farbe = { fehlt: "bg-red-100 text-red-700", abweichung: "bg-amber-100 text-amber-800", "ohne-plan": "bg-blue-100 text-blue-700", anders: "bg-neutral-100 text-neutral-700" }
+  const label = { fehlt: "Nicht erfasst", abweichung: "Abweichung", "ohne-plan": "Ohne Schicht", anders: "Anders erfasst" }
+
+  return (
+    <div className={karte}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-lg font-bold">Abgleich Plan ↔ Zeiterfassung</h3>
+        <span className="text-xs text-neutral-500">bis heute · Abweichungen ab 30 Min.</span>
+      </div>
+      {zeilen.length === 0 ? (
+        <p className="mt-2 text-sm text-green-700">✔ Alles passt – alle geplanten Schichten sind erfasst.</p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-neutral-500">
+                <th className="py-2">Mitarbeiter</th>
+                <th className="py-2">Tag</th>
+                <th className="py-2">Geplant</th>
+                <th className="py-2">Erfasst</th>
+                <th className="py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {zeilen.map((z) => (
+                <tr key={z.p.id + z.datum} className="border-t">
+                  <td className="py-2 font-medium">{z.p.full_name}</td>
+                  <td className="py-2">{datumText(z.datum)}</td>
+                  <td className="py-2">{z.plan}</td>
+                  <td className="py-2">{z.ist}</td>
+                  <td className="py-2 text-right">
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${farbe[z.art]}`}>{label[z.art]}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function dauerMinutenLokal(beginn: string, ende: string) {
+  const a = Number(beginn.slice(0, 2)) * 60 + Number(beginn.slice(3, 5))
+  let b = Number(ende.slice(0, 2)) * 60 + Number(ende.slice(3, 5))
+  if (b <= a) b += 1440
+  return b - a
 }
 
 function SchichtChip({ s, b, onClick }: { s: Schicht; b?: Bereich; onClick: () => void }) {
