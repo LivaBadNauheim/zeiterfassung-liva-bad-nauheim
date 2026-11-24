@@ -20,8 +20,8 @@ In Vercel → Project → Settings → Environment Variables eintragen:
 Danach neu deployen.
 
 ## 3. Stündlicher Cron (Erinnerungen)
-`vercel.json` ruft `/api/cron/dienstplan` stündlich auf – **das geht nur mit Vercel Pro**.
-Bei Vercel Hobby stattdessen kostenlos über Supabase (SQL-Editor, Domain und Secret ersetzen):
+Vercel Hobby erlaubt keine stündlichen Cron-Jobs, deshalb läuft der Aufruf über Supabase (kostenlos).
+Im Supabase SQL-Editor ausführen (Domain und Secret ersetzen):
 
 ```sql
 create extension if not exists pg_cron;
@@ -33,7 +33,6 @@ select cron.schedule('dienstplan-stuendlich', '5 * * * *', $$
   );
 $$);
 ```
-(Dann den `crons`-Eintrag in `vercel.json` entfernen.)
 
 ## 4. Mitarbeitende: App + Push
 - **iPhone (ab iOS 16.4):** Seite in Safari öffnen → Teilen → „Zum Home-Bildschirm“ → App von dort öffnen → einloggen → Dienstplan → „Aktivieren“. Push geht auf dem iPhone **nur** aus der installierten App.
