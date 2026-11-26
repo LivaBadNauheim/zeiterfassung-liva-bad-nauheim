@@ -166,3 +166,54 @@ export function pruefeZuweisung(
 
   return { sperren, hinweise }
 }
+
+// ---------- Frueh / Spaet ----------
+
+export type SchichtZeitenEinstellung = {
+  frueh_beginn?: string
+  frueh_ende?: string
+  spaet_beginn?: string
+  spaet_ende?: string
+  so_frueh_beginn?: string
+  so_frueh_ende?: string
+  so_spaet_beginn?: string
+  so_spaet_ende?: string
+}
+
+/** Frueh-/Spaetschicht fuer einen Tag (Sonntag eigene Zeiten). */
+export function schichtZeitenFuer(datum: string, e: SchichtZeitenEinstellung) {
+  const so = wochentag(datum) === 7
+  const z = (k: string, d: string) => ((e as Record<string, string | undefined>)[k] || d).slice(0, 5)
+  return so
+    ? { frueh: [z("so_frueh_beginn", "09:30"), z("so_frueh_ende", "16:00")], spaet: [z("so_spaet_beginn", "16:00"), z("so_spaet_ende", "22:00")] }
+    : { frueh: [z("frueh_beginn", "08:30"), z("frueh_ende", "16:00")], spaet: [z("spaet_beginn", "16:00"), z("spaet_ende", "23:00")] }
+}
+
+export type VerfTag = { verfuegbar: boolean; frueh?: boolean | null; spaet?: boolean | null }
+
+/**
+ * Passt die Schicht zur eingetragenen Verfuegbarkeit?
+ * null = nichts eingetragen. Alte Eintraege ohne frueh/spaet gelten fuer den ganzen Tag.
+ * Eine Schicht braucht "frueh", wenn sie vor Beginn der Spaetschicht anfaengt,
+ * und "spaet", wenn sie nach Ende der Fruehschicht aufhoert.
+ */
+export function passtVerfuegbarkeit(s: SchichtZeit, v: VerfTag | null | undefined, e: SchichtZeitenEinstellung): boolean | null {
+  if (!v) return null
+  if (!v.verfuegbar) return false
+  if (v.frueh == null && v.spaet == null) return true
+  const z = schichtZeitenFuer(s.datum, e)
+  const start = zeitZuMinuten(s.beginn)
+  const ende = start + dauerMinuten(s)
+  const brauchtFrueh = start < zeitZuMinuten(z.spaet[0])
+  const brauchtSpaet = ende > zeitZuMinuten(z.frueh[1])
+  return (!brauchtFrueh || !!v.frueh) && (!brauchtSpaet || !!v.spaet)
+}
+
+export function verfText(v: VerfTag | null | undefined): string {
+  if (!v) return "Frei"
+  if (!v.verfuegbar) return "Kann nicht"
+  if (v.frueh && v.spaet) return "Früh + Spät"
+  if (v.frueh) return "Früh"
+  if (v.spaet) return "Spät"
+  return "Kann ✓"
+}
