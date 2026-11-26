@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import { AdminDienstplan, MitarbeiterDienstplan, ladeGeplanteSchichten, type Geplant } from "@/app/dienstplan/Dienstplan"
+import { ArchivKarte } from "@/app/dienstplan/Archiv"
 
 type Profile = {
   id: string
@@ -2203,6 +2204,8 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          {profile.role === "admin" && adminView === "export" && <ArchivKarte />}
 
           {profile.role === "admin" && adminView === "export" && (
             <div className="rounded-2xl bg-white p-6 shadow">
