@@ -41,15 +41,25 @@ export function fehlerAntwort(e: unknown) {
 // ---------- Push ----------
 
 let vapidGesetzt = false
-function vapid() {
+function vapid(fehler?: string[]) {
   if (vapidGesetzt) return true
-  const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-  const priv = process.env.VAPID_PRIVATE_KEY
+  const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim()
+  const priv = process.env.VAPID_PRIVATE_KEY?.trim()
   if (!pub || !priv) {
     console.warn("VAPID-Keys fehlen – Push deaktiviert.")
+    fehler?.push("VAPID-Schlüssel fehlen")
     return false
   }
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:admin@liva-bad-nauheim.de", pub, priv)
+  // Subject muss mit mailto: oder https: beginnen, sonst wirft web-push
+  let subject = (process.env.VAPID_SUBJECT || "").trim()
+  if (!/^(mailto:|https:)/.test(subject)) subject = subject.includes("@") ? `mailto:${subject}` : "mailto:admin@liva-badnauheim.de"
+  try {
+    webpush.setVapidDetails(subject, pub, priv)
+  } catch (e) {
+    console.error("VAPID ungültig:", e)
+    fehler?.push("VAPID ungültig: " + (e as Error).message)
+    return false
+  }
   vapidGesetzt = true
   return true
 }
@@ -57,8 +67,8 @@ function vapid() {
 export type Nachricht = { title: string; body: string; url?: string; tag?: string }
 
 /** Schickt eine Push-Nachricht an alle Geraete der genannten Personen. Fehler werden nur geloggt. */
-export async function pushAn(db: SupabaseClient, userIds: string[], n: Nachricht): Promise<number> {
-  if (!userIds.length || !vapid()) return 0
+export async function pushAn(db: SupabaseClient, userIds: string[], n: Nachricht, fehler?: string[]): Promise<number> {
+  if (!userIds.length || !vapid(fehler)) return 0
   const { data: abos } = await db.from("push_abos").select("endpoint,p256dh,auth").in("user_id", userIds)
   let ok = 0
   await Promise.all(
@@ -73,6 +83,8 @@ export async function pushAn(db: SupabaseClient, userIds: string[], n: Nachricht
       } catch (e: unknown) {
         const status = (e as { statusCode?: number }).statusCode
         // Abo abgelaufen / App deinstalliert -> aufraeumen
+        const body = (e as { body?: string }).body
+        fehler?.push(`${status ?? ""} ${body || (e as Error).message}`.trim())
         if (status === 404 || status === 410) await db.from("push_abos").delete().eq("endpoint", a.endpoint)
         else console.error("Push fehlgeschlagen:", status, e)
       }

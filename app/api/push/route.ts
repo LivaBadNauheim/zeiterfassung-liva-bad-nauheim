@@ -9,8 +9,20 @@ export async function POST(req: Request) {
     const me = await benutzerAusRequest(req, db)
     const body = await req.json()
     if (body.test) {
-      const n = await pushAn(db, [me.id], { title: "Liva Dienstplan", body: "Push funktioniert ✔", tag: "test" })
-      return Response.json({ success: true, gesendet: n })
+      // Diagnose: Schluessel vorhanden? Abos gespeichert? Fehler beim Senden?
+      const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+      if (!pub || !process.env.VAPID_PRIVATE_KEY) {
+        return Response.json({ success: false, error: "VAPID-Schlüssel fehlen in Vercel (oder nach dem Eintragen nicht neu deployt)." })
+      }
+      if (body.clientKey && body.clientKey !== pub) {
+        return Response.json({ success: false, error: "Die App nutzt einen anderen öffentlichen Schlüssel als der Server. Bitte neu deployen, App neu laden, Push aus- und wieder einschalten." })
+      }
+      const { count } = await db.from("push_abos").select("endpoint", { count: "exact", head: true }).eq("user_id", me.id)
+      if (!count) return Response.json({ success: false, error: "Für dein Konto ist kein Gerät gespeichert. Bitte „Aus“ und dann wieder „Aktivieren“ tippen." })
+      const fehler: string[] = []
+      const n = await pushAn(db, [me.id], { title: "Liva Dienstplan", body: "Push funktioniert ✔", tag: "test" }, fehler)
+      if (!n) return Response.json({ success: false, error: `Senden fehlgeschlagen (${count} Gerät(e)): ${fehler.join(" | ") || "unbekannt"}` })
+      return Response.json({ success: true, gesendet: n, geraete: count })
     }
     const s = body.subscription
     if (!s?.endpoint || !s?.keys?.p256dh || !s?.keys?.auth) throw new Fehler("Ungültiges Abo.")

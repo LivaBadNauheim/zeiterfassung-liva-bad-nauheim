@@ -149,9 +149,19 @@ export function PushKarte({ rolle }: { rolle: "admin" | "employee" }) {
       })
       await pushApi("POST", { subscription: sub.toJSON() })
       setStatus("an")
-      await pushApi("POST", { test: true })
+      await testen()
     } catch (e) {
       setMeldung("Aktivieren fehlgeschlagen: " + (e as Error).message)
+    }
+  }
+
+  async function testen() {
+    setMeldung("Sende Test …")
+    try {
+      const j = await pushApi("POST", { test: true, clientKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY })
+      setMeldung(j.success ? `✔ Gesendet an ${j.gesendet} Gerät(e). Kommt nichts an: Mitteilungen in den Handy-Einstellungen prüfen.` : `✖ ${j.error}`)
+    } catch (e) {
+      setMeldung("✖ " + (e as Error).message)
     }
   }
 
@@ -170,9 +180,10 @@ export function PushKarte({ rolle }: { rolle: "admin" | "employee" }) {
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white px-6 py-3 text-sm shadow">
         <span>🔔 Benachrichtigungen sind auf diesem Gerät aktiv.</span>
         <span className="flex gap-2">
-          <button className={knopf} onClick={() => pushApi("POST", { test: true })}>Test</button>
+          <button className={knopf} onClick={testen}>Test</button>
           <button className={knopf} onClick={deaktivieren}>Aus</button>
         </span>
+        {meldung && <p className={`w-full text-xs ${meldung.startsWith("✖") ? "text-red-700" : "text-green-700"}`}>{meldung}</p>}
       </div>
     )
 
