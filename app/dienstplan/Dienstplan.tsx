@@ -10,7 +10,10 @@ import {
   berlinJetzt,
   formatStunden,
   montagVon,
+  passtVerfuegbarkeit,
   pruefeZuweisung,
+  schichtZeitenFuer,
+  verfText,
   wochentag,
 } from "@/lib/dienstplan/regeln"
 
@@ -30,8 +33,21 @@ type Schicht = {
   ausfall_grund: string | null
 }
 type Person = { id: string; full_name: string; role: string; mitarbeiter_typ: string; stunden_grenze: number }
-type Verf = { user_id?: string; datum: string; verfuegbar: boolean; notiz: string | null }
-type Einstellungen = { frist_wochentag: number; frist_uhrzeit: string; erinnerung_stunden: number; schicht_erinnerung_stunden: number }
+type Verf = { user_id?: string; datum: string; verfuegbar: boolean; frueh?: boolean | null; spaet?: boolean | null; notiz: string | null }
+type Einstellungen = {
+  frist_wochentag: number
+  frist_uhrzeit: string
+  erinnerung_stunden: number
+  schicht_erinnerung_stunden: number
+  frueh_beginn?: string
+  frueh_ende?: string
+  spaet_beginn?: string
+  spaet_ende?: string
+  so_frueh_beginn?: string
+  so_frueh_ende?: string
+  so_spaet_beginn?: string
+  so_spaet_ende?: string
+}
 
 const TAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 const TYP_LABEL: Record<string, string> = { vollzeit: "Vollzeit", teilzeit: "Teilzeit", minijob: "Minijob" }
@@ -222,7 +238,7 @@ export function PushKarte({ rolle }: { rolle: "admin" | "employee" }) {
 
 export function MitarbeiterDienstplan() {
   const [d, setD] = useState<any>(null)
-  const [verf, setVerf] = useState<Record<string, boolean | undefined>>({})
+  const [verf, setVerf] = useState<Record<string, { frueh: boolean; spaet: boolean }>>({})
   const [meldung, setMeldung] = useState({ text: "", fehler: false })
   const [busy, setBusy] = useState(false)
 
@@ -231,8 +247,11 @@ export function MitarbeiterDienstplan() {
       api("GET", "")
         .then((j) => {
           setD(j)
-          const v: Record<string, boolean> = {}
-          for (const t of j.verfuegbarkeit.tage ?? []) v[t.datum] = t.verfuegbar
+          const v: Record<string, { frueh: boolean; spaet: boolean }> = {}
+          for (const t of j.verfuegbarkeit.tage ?? []) {
+            // alte Eintraege ohne frueh/spaet: "kann" = beides
+            v[t.datum] = t.frueh == null && t.spaet == null ? { frueh: !!t.verfuegbar, spaet: !!t.verfuegbar } : { frueh: !!t.frueh, spaet: !!t.spaet }
+          }
           setVerf(v)
         })
         .catch((e) => setMeldung({ text: (e as Error).message, fehler: true })),
@@ -261,7 +280,8 @@ export function MitarbeiterDienstplan() {
   const bereich = (id: string | null) => d.bereiche.find((b: Bereich) => b.id === id)
   const vWoche: string = d.verfuegbarkeit.woche
   const vTage = Array.from({ length: 7 }, (_, i) => addTage(vWoche, i))
-  const alleEingetragen = vTage.every((t) => verf[t] !== undefined)
+  const umschalten = (t: string, k: "frueh" | "spaet") =>
+    setVerf((v) => ({ ...v, [t]: { frueh: !!v[t]?.frueh, spaet: !!v[t]?.spaet, [k]: !v[t]?.[k] } }))
   const heute = berlinJetzt().datum
   const nachWoche = new Map<string, Schicht[]>()
   for (const s of d.meineSchichten as Schicht[]) {
@@ -349,34 +369,38 @@ export function MitarbeiterDienstplan() {
         <p className="text-sm text-neutral-600">
           Woche ab <b>{datumText(vWoche)}</b> · eintragen bis <b>{datumText(d.verfuegbarkeit.frist.datum)} {d.verfuegbarkeit.frist.zeit} Uhr</b>
         </p>
-        {!alleEingetragen && <p className="mt-1 text-xs font-medium text-orange-strong">Bitte jeden Tag auswählen.</p>}
+        <p className="mt-1 text-xs text-neutral-500">Tippe an, wann du kannst. Nichts ausgewählt = du kannst an dem Tag nicht.</p>
         <div className="mt-4 space-y-2">
-          {vTage.map((t) => (
-            <div key={t} className="flex items-center justify-between gap-2 rounded-xl border p-2 pl-3">
-              <span className="text-sm font-medium">{datumText(t)}</span>
-              <span className="flex gap-1">
-                <button
-                  onClick={() => setVerf((v) => ({ ...v, [t]: true }))}
-                  className={`rounded-lg px-3 py-2 text-sm ${verf[t] === true ? "bg-green-600 text-white" : "border"}`}
-                >
-                  Kann
-                </button>
-                <button
-                  onClick={() => setVerf((v) => ({ ...v, [t]: false }))}
-                  className={`rounded-lg px-3 py-2 text-sm ${verf[t] === false ? "bg-red-600 text-white" : "border"}`}
-                >
-                  Kann nicht
-                </button>
-              </span>
-            </div>
-          ))}
+          {vTage.map((t) => {
+            const z = schichtZeitenFuer(t, d.einstellungen ?? {})
+            const v = verf[t]
+            const nichts = !v?.frueh && !v?.spaet
+            const knopfVerf = (an: boolean) =>
+              `flex min-w-[104px] flex-col items-center rounded-lg px-3 py-1.5 text-sm font-medium transition ${an ? "bg-green-600 text-white" : "border text-neutral-700 hover:bg-neutral-100"}`
+            return (
+              <div key={t} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-2 pl-3">
+                <span className="text-sm font-medium">
+                  {datumText(t)}
+                  {nichts && <span className="ml-2 text-xs font-normal text-red-600">kann nicht</span>}
+                </span>
+                <span className="flex gap-2">
+                  <button onClick={() => umschalten(t, "frueh")} className={knopfVerf(!!v?.frueh)}>
+                    Früh<span className="text-[11px] font-normal opacity-80">{z.frueh[0]}–{z.frueh[1]}</span>
+                  </button>
+                  <button onClick={() => umschalten(t, "spaet")} className={knopfVerf(!!v?.spaet)}>
+                    Spät<span className="text-[11px] font-normal opacity-80">{z.spaet[0]}–{z.spaet[1]}</span>
+                  </button>
+                </span>
+              </div>
+            )
+          })}
         </div>
         <button
-          disabled={busy || !alleEingetragen}
+          disabled={busy}
           className={`${knopfDunkel} mt-4 w-full`}
           onClick={() =>
             aktion(
-              { aktion: "verfuegbarkeit_speichern", woche: vWoche, tage: vTage.map((t) => ({ datum: t, verfuegbar: verf[t] })) },
+              { aktion: "verfuegbarkeit_speichern", woche: vWoche, tage: vTage.map((t) => ({ datum: t, frueh: !!verf[t]?.frueh, spaet: !!verf[t]?.spaet })) },
               "Verfügbarkeit gespeichert ✔"
             )
           }
@@ -687,7 +711,7 @@ export function AdminDienstplan() {
                                         : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
                                   }`}
                                 >
-                                  {v?.verfuegbar === false ? "Kann nicht" : v?.verfuegbar ? "Kann ✓" : "Frei"}
+                                  {verfText(v)}
                                 </button>
                               ) : (
                                 <button onClick={neu} className="w-full rounded text-[11px] text-neutral-400 hover:text-neutral-700">
@@ -715,7 +739,7 @@ export function AdminDienstplan() {
                 </span>
               ))}
               <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-neutral-300" /> Frei (nichts eingetragen)</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" /> Kann</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" /> Kann (Früh / Spät)</span>
               <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" /> Kann nicht</span>
               <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-pink-300" /> Krank</span>
             </div>
@@ -735,6 +759,7 @@ export function AdminDienstplan() {
           bereiche={bereiche}
           alle={alle}
           verfMap={verfMap}
+          einstellungen={d.einstellungen}
           zuordnung={d.zuordnung}
           interessen={d.interessen}
           busy={busy}
@@ -868,6 +893,7 @@ function SchichtDialog({
   bereiche,
   alle,
   verfMap,
+  einstellungen,
   zuordnung,
   interessen,
   busy,
@@ -880,6 +906,7 @@ function SchichtDialog({
   bereiche: Bereich[]
   alle: Schicht[]
   verfMap: Map<string, Verf>
+  einstellungen: Einstellungen
   zuordnung: { user_id: string; bereich_id: string }[]
   interessen: { schicht_id: string; user_id: string }[]
   busy: boolean
@@ -890,8 +917,8 @@ function SchichtDialog({
   const [s, setS] = useState({
     id: start.id,
     datum: start.datum,
-    beginn: start.beginn ? hhmm(start.beginn) : "17:00",
-    ende: start.ende ? hhmm(start.ende) : "23:00",
+    beginn: start.beginn ? hhmm(start.beginn) : schichtZeitenFuer(start.datum, einstellungen ?? {}).spaet[0],
+    ende: start.ende ? hhmm(start.ende) : schichtZeitenFuer(start.datum, einstellungen ?? {}).spaet[1],
     mitarbeiter_id: start.mitarbeiter_id ?? "",
     bereich_id:
       start.bereich_id ??
@@ -909,14 +936,15 @@ function SchichtDialog({
       .map((p) => {
         const eigene = alle.filter((x) => x.mitarbeiter_id === p.id && x.id !== s.id)
         const v = verfMap.get(`${p.id}|${s.datum}`)
-        const r = pruefeZuweisung({ ...s, id: s.id }, eigene, { verfuegbar: v ? v.verfuegbar : null })
+        const passt = passtVerfuegbarkeit(s, v, einstellungen)
+        const r = pruefeZuweisung({ ...s, id: s.id }, eigene, { verfuegbar: passt })
         const wochenMin = eigene.filter((x) => montagVon(x.datum) === woche).reduce((m, x) => m + arbeitsMinuten(x), 0)
         const imBereich = !s.bereich_id || !zuordnung.some((z) => z.user_id === p.id) || zuordnung.some((z) => z.user_id === p.id && z.bereich_id === s.bereich_id)
         const eingeteilt = eigene.some((x) => x.datum === s.datum)
         const interesse = !!s.id && interessen.some((i) => i.schicht_id === s.id && i.user_id === p.id)
-        let status = v?.verfuegbar ? "frei ✔" : "frei"
+        let status = passt ? "frei ✔" : "frei"
         if (eingeteilt) status = "schon eingeteilt"
-        if (v?.verfuegbar === false) status = "kann nicht"
+        if (passt === false) status = v?.verfuegbar ? `nur ${verfText(v)}` : "kann nicht"
         else if (r.sperren.length) status = "Konflikt"
         return { p, r, wochenMin, imBereich, status, interesse, gesperrt: r.sperren.length > 0 }
       })
@@ -927,7 +955,7 @@ function SchichtDialog({
           Number(b.imBereich) - Number(a.imBereich) ||
           a.wochenMin - b.wochenMin
       )
-  }, [s, personen, alle, verfMap, zuordnung, interessen])
+  }, [s, personen, alle, verfMap, einstellungen, zuordnung, interessen])
 
   const gewaehlt = kandidaten.find((k) => k.p.id === s.mitarbeiter_id)
   const feld = "mt-1 block h-11 w-full min-w-0 appearance-none rounded-lg border bg-white px-3 text-base"
@@ -938,7 +966,22 @@ function SchichtDialog({
         <h3 className="text-lg font-bold">
           {s.id ? "Schicht bearbeiten" : "Neue Schicht"} · {TAGE_LANG[wochentag(s.datum) - 1]}, {datumText(s.datum)}
         </h3>
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="mt-4 flex gap-2">
+          {(["frueh", "spaet"] as const).map((k) => {
+            const z = schichtZeitenFuer(s.datum, einstellungen ?? {})[k]
+            const an = s.beginn === z[0] && s.ende === z[1]
+            return (
+              <button
+                key={k}
+                onClick={() => setS({ ...s, beginn: z[0], ende: z[1] })}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${an ? "border-navy bg-navy text-white" : "hover:bg-neutral-100"}`}
+              >
+                {k === "frueh" ? "Früh" : "Spät"} <span className="text-xs font-normal opacity-80">{z[0]}–{z[1]}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <label className="block min-w-0 text-sm font-medium text-neutral-600">Beginn<input type="time" className={feld} value={s.beginn} onChange={(e) => setS({ ...s, beginn: e.target.value })} /></label>
           <label className="block min-w-0 text-sm font-medium text-neutral-600">Ende<input type="time" className={feld} value={s.ende} onChange={(e) => setS({ ...s, ende: e.target.value })} /></label>
           <label className="block min-w-0 text-sm font-medium text-neutral-600">Datum<input type="date" className={feld} value={s.datum} onChange={(e) => setS({ ...s, datum: e.target.value })} /></label>
@@ -984,7 +1027,7 @@ function SchichtDialog({
               </span>
               <span
                 className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                  k.status === "kann nicht" || k.status === "Konflikt"
+                  k.status === "kann nicht" || k.status === "Konflikt" || k.status.startsWith("nur ")
                     ? "bg-red-100 text-red-700"
                     : k.status === "schon eingeteilt"
                       ? "bg-amber-100 text-amber-800"
@@ -1048,7 +1091,21 @@ function EinstellungenAdmin({
   aktion: (b: object, ok: string) => Promise<boolean>
   busy: boolean
 }) {
-  const [e, setE] = useState<Einstellungen>({ ...d.einstellungen, frist_uhrzeit: hhmm(d.einstellungen.frist_uhrzeit) })
+  const [e, setE] = useState<Einstellungen>(() => {
+    const x = { ...d.einstellungen, frist_uhrzeit: hhmm(d.einstellungen.frist_uhrzeit) }
+    const wt = schichtZeitenFuer("2026-11-30", x)
+    const so = schichtZeitenFuer("2026-12-06", x)
+    return {
+      ...x,
+      frueh_beginn: wt.frueh[0], frueh_ende: wt.frueh[1], spaet_beginn: wt.spaet[0], spaet_ende: wt.spaet[1],
+      so_frueh_beginn: so.frueh[0], so_frueh_ende: so.frueh[1], so_spaet_beginn: so.spaet[0], so_spaet_ende: so.spaet[1],
+    }
+  })
+  const zeitFeld = (k: keyof Einstellungen, label: string) => (
+    <label className="block min-w-0 text-sm font-medium text-neutral-600">{label}
+      <input type="time" className={feld} value={(e[k] as string) ?? ""} onChange={(x) => setE({ ...e, [k]: x.target.value })} />
+    </label>
+  )
   const zuordnung: { user_id: string; bereich_id: string }[] = d.zuordnung
   const feld = "mt-1 block h-11 w-full min-w-0 appearance-none rounded-lg border bg-white px-3 text-base"
 
@@ -1079,6 +1136,22 @@ function EinstellungenAdmin({
           Ablauf: {e.erinnerung_stunden} Std. vor Fristende bekommen alle, die noch nichts eingetragen haben, eine Push-Erinnerung.
           Nach Fristende bekommst du eine Liste, wer fehlt. Danach können Mitarbeitende die Woche nicht mehr ändern.
         </p>
+        <h3 className="mt-6 text-lg font-bold">Schichtzeiten Früh / Spät</h3>
+        <p className="text-sm text-neutral-600">Gilt für die Verfügbarkeit der Mitarbeitenden und die Schnellauswahl beim Planen.</p>
+        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Montag – Samstag</p>
+        <div className="mt-1 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {zeitFeld("frueh_beginn", "Früh von")}
+          {zeitFeld("frueh_ende", "Früh bis")}
+          {zeitFeld("spaet_beginn", "Spät von")}
+          {zeitFeld("spaet_ende", "Spät bis")}
+        </div>
+        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Sonntag</p>
+        <div className="mt-1 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {zeitFeld("so_frueh_beginn", "Früh von")}
+          {zeitFeld("so_frueh_ende", "Früh bis")}
+          {zeitFeld("so_spaet_beginn", "Spät von")}
+          {zeitFeld("so_spaet_ende", "Spät bis")}
+        </div>
         <button className={`${knopfDunkel} mt-4`} disabled={busy} onClick={() => aktion({ aktion: "einstellungen_speichern", ...e }, "Einstellungen gespeichert.")}>
           Speichern
         </button>

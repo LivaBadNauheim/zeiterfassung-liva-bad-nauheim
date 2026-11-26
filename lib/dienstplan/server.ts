@@ -68,6 +68,17 @@ export type Nachricht = { title: string; body: string; url?: string; tag?: strin
 
 /** Schickt eine Push-Nachricht an alle Geraete der genannten Personen. Fehler werden nur geloggt. */
 export async function pushAn(db: SupabaseClient, userIds: string[], n: Nachricht, fehler?: string[]): Promise<number> {
+  // Push darf nie die eigentliche Aktion (Freigabe, Krankmeldung ...) scheitern lassen
+  try {
+    return await pushSenden(db, userIds, n, fehler)
+  } catch (e) {
+    console.error("Push-Fehler:", e)
+    fehler?.push((e as Error).message)
+    return 0
+  }
+}
+
+async function pushSenden(db: SupabaseClient, userIds: string[], n: Nachricht, fehler?: string[]): Promise<number> {
   if (!userIds.length || !vapid(fehler)) return 0
   const { data: abos } = await db.from("push_abos").select("endpoint,p256dh,auth").in("user_id", userIds)
   let ok = 0

@@ -18,6 +18,7 @@ import {
   fristFuerWoche,
   montagVon,
   offeneVerfuegbarkeitsWoche,
+  passtVerfuegbarkeit,
   pruefeZuweisung,
   type SchichtZeit,
 } from "@/lib/dienstplan/regeln"
@@ -76,7 +77,7 @@ export async function GET(req: Request) {
         db.from("mitarbeiter_bereiche").select("user_id,bereich_id"),
         // Vortag/Folgetag fuer Ruhezeit-Pruefung, Monat fuer Minijob-Grenze
         db.from("schichten").select(SCHICHT_FELDER).gte("datum", addTage(woche.slice(0, 8) + "01", -1)).lte("datum", addTage(bis, 31)),
-        db.from("verfuegbarkeiten").select("user_id,datum,verfuegbar,notiz").gte("datum", woche).lte("datum", bis),
+        db.from("verfuegbarkeiten").select("user_id,datum,verfuegbar,frueh,spaet,notiz").gte("datum", woche).lte("datum", bis),
         db.from("dienstplan_wochen").select("*").eq("woche_start", woche).maybeSingle(),
         db.from("schichten").select(SCHICHT_FELDER).eq("offen", true).gte("datum", heute).order("datum"),
         // Fuer den Abgleich Plan <-> Zeiterfassung
@@ -114,7 +115,7 @@ export async function GET(req: Request) {
       db.from("schichten").select(SCHICHT_FELDER).eq("mitarbeiter_id", me.id).gte("datum", ab).lte("datum", bis).order("datum").order("beginn"),
       db.from("schichten").select(SCHICHT_FELDER).eq("offen", true).gte("datum", heute).order("datum").order("beginn"),
       db.from("schicht_interessen").select("schicht_id").eq("user_id", me.id),
-      db.from("verfuegbarkeiten").select("datum,verfuegbar,notiz").eq("user_id", me.id).gte("datum", verfWoche).lte("datum", addTage(verfWoche, 6)),
+      db.from("verfuegbarkeiten").select("datum,verfuegbar,frueh,spaet,notiz").eq("user_id", me.id).gte("datum", verfWoche).lte("datum", addTage(verfWoche, 6)),
       db.from("mitarbeiter_bereiche").select("bereich_id").eq("user_id", me.id),
     ])
     const freigegeben = new Set((wochen.data ?? []).map((w) => w.woche_start))
@@ -129,6 +130,7 @@ export async function GET(req: Request) {
       offene: (offene.data ?? []).filter((s) => !s.bereich_id || !meineBereiche.length || meineBereiche.includes(s.bereich_id)),
       meineInteressen: (meineInteressen.data ?? []).map((i) => i.schicht_id),
       verfuegbarkeit: { woche: verfWoche, frist: fristFuerWoche(verfWoche, e), tage: verf.data },
+      einstellungen: e,
     })
   } catch (e) {
     return fehlerAntwort(e)
@@ -175,9 +177,10 @@ export async function POST(req: Request) {
 // ---------------------------------------------------------------- Regeln serverseitig
 
 async function pruefeFuerPerson(db: SupabaseClient, userId: string, neu: SchichtZeit) {
-  const [{ data: p }, { data: v }] = await Promise.all([
+  const [{ data: p }, { data: v }, e] = await Promise.all([
     db.from("profiles").select("mitarbeiter_typ,stunden_grenze").eq("id", userId).single(),
-    db.from("verfuegbarkeiten").select("verfuegbar").eq("user_id", userId).eq("datum", neu.datum).maybeSingle(),
+    db.from("verfuegbarkeiten").select("verfuegbar,frueh,spaet").eq("user_id", userId).eq("datum", neu.datum).maybeSingle(),
+    einstellungen(db),
   ])
   const minijob = p?.mitarbeiter_typ === "minijob"
   const von = minijob ? neu.datum.slice(0, 8) + "01" : montagVon(neu.datum)
@@ -191,7 +194,7 @@ async function pruefeFuerPerson(db: SupabaseClient, userId: string, neu: Schicht
   const liste = (andere ?? []).filter((s) => s.id !== neu.id)
   const bisherMin = liste.filter((s) => s.datum >= von && s.datum <= bis).reduce((m, s) => m + arbeitsMinuten(s), 0)
   return pruefeZuweisung(neu, liste, {
-    verfuegbar: v?.verfuegbar ?? null,
+    verfuegbar: passtVerfuegbarkeit(neu, v, e),
     grenze: { stunden: Number(p?.stunden_grenze || 0), bisherMin, label: minijob ? "Monatsgrenze" : "Wochengrenze" },
   })
 }
@@ -368,6 +371,9 @@ async function einstellungenSpeichern(db: SupabaseClient, _me: Benutzer, b: any)
     frist_uhrzeit: ZEIT.test(b.frist_uhrzeit) ? b.frist_uhrzeit : "18:00",
     erinnerung_stunden: Math.min(168, Math.max(1, Number(b.erinnerung_stunden) || 24)),
     schicht_erinnerung_stunden: Math.min(168, Math.max(0, Number(b.schicht_erinnerung_stunden) || 0)),
+  } as Record<string, unknown>
+  for (const k of ["frueh_beginn", "frueh_ende", "spaet_beginn", "spaet_ende", "so_frueh_beginn", "so_frueh_ende", "so_spaet_beginn", "so_spaet_ende"]) {
+    if (ZEIT.test(b[k] || "")) daten[k] = b[k]
   }
   const { error } = await db.from("dienstplan_einstellungen").upsert(daten)
   if (error) throw new Fehler(error.message, 500)
@@ -389,7 +395,7 @@ async function verfuegbarkeitSpeichern(db: SupabaseClient, me: Benutzer, b: any)
   const erlaubt = offeneVerfuegbarkeitsWoche(jetzt, e)
   const woche = montagVon(String(b.woche || ""))
   if (me.role !== "admin" && woche < erlaubt) throw new Fehler("Die Frist für diese Woche ist abgelaufen.", 409)
-  const tage: { datum: string; verfuegbar: boolean; notiz?: string }[] = (b.tage ?? []).filter(
+  const tage: { datum: string; frueh?: boolean; spaet?: boolean; notiz?: string }[] = (b.tage ?? []).filter(
     (t: any) => DATUM.test(t.datum) && montagVon(t.datum) === woche
   )
   const userId = me.role === "admin" && b.user_id ? b.user_id : me.id
@@ -398,7 +404,10 @@ async function verfuegbarkeitSpeichern(db: SupabaseClient, me: Benutzer, b: any)
       tage.map((t) => ({
         user_id: userId,
         datum: t.datum,
-        verfuegbar: !!t.verfuegbar,
+        // nichts angehakt = kann nicht
+        verfuegbar: !!t.frueh || !!t.spaet,
+        frueh: !!t.frueh,
+        spaet: !!t.spaet,
         notiz: (t.notiz || "").toString().slice(0, 140) || null,
         updated_at: new Date().toISOString(),
       }))
