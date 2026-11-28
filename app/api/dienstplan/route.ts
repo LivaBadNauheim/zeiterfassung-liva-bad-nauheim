@@ -157,7 +157,6 @@ export async function POST(req: Request) {
     }
     const mitarbeiterAktionen: Record<string, (db: SupabaseClient, me: Benutzer, b: any) => Promise<unknown>> = {
       verfuegbarkeit_speichern: verfuegbarkeitSpeichern,
-      krank_melden: krankMelden,
       interesse: interesse,
     }
 
@@ -414,26 +413,6 @@ async function verfuegbarkeitSpeichern(db: SupabaseClient, me: Benutzer, b: any)
     )
     if (error) throw new Fehler(error.message, 500)
   }
-  return {}
-}
-
-async function krankMelden(db: SupabaseClient, me: Benutzer, b: any) {
-  const heute = berlinJetzt().datum
-  // Atomar: nur die eigene Schicht, nur heute oder spaeter
-  const { data } = await db
-    .from("schichten")
-    .update({ mitarbeiter_id: null, offen: false, offen_seit: null, ausfall_grund: "krank", erinnert_am: null })
-    .eq("id", b.schicht_id)
-    .eq("mitarbeiter_id", me.id)
-    .gte("datum", heute)
-    .select(SCHICHT_FELDER)
-  const s = data?.[0]
-  if (!s) throw new Fehler("Schicht nicht gefunden oder schon vorbei.", 404)
-  await pushAn(db, await adminIds(db), {
-    title: `🤒 Krankmeldung: ${me.full_name}`,
-    body: `${zeitText(s)} ist jetzt unbesetzt. Bitte Ersatz finden.`,
-    tag: `krank-${s.id}`,
-  })
   return {}
 }
 

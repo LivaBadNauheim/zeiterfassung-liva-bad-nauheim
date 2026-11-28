@@ -282,7 +282,6 @@ export function MitarbeiterDienstplan() {
   const vTage = Array.from({ length: 7 }, (_, i) => addTage(vWoche, i))
   const umschalten = (t: string, k: "frueh" | "spaet") =>
     setVerf((v) => ({ ...v, [t]: { frueh: !!v[t]?.frueh, spaet: !!v[t]?.spaet, [k]: !v[t]?.[k] } }))
-  const heute = berlinJetzt().datum
   const nachWoche = new Map<string, Schicht[]>()
   for (const s of d.meineSchichten as Schicht[]) {
     const w = montagVon(s.datum)
@@ -315,18 +314,6 @@ export function MitarbeiterDienstplan() {
                       <p className="font-semibold">{datumText(s.datum)} · {zeitText(s)}</p>
                       <p className="text-xs text-neutral-500">{b?.name ?? "–"}{s.notiz ? ` · ${s.notiz}` : ""}</p>
                     </div>
-                    {s.datum >= heute && (
-                      <button
-                        disabled={busy}
-                        className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
-                        onClick={() => {
-                          if (confirm(`Für ${datumText(s.datum)} ${zeitText(s)} krank melden? Die Leitung wird sofort benachrichtigt.`))
-                            aktion({ aktion: "krank_melden", schicht_id: s.id }, "Krankmeldung gesendet. Gute Besserung!")
-                        }}
-                      >
-                        🤒 Krank
-                      </button>
-                    )}
                   </li>
                 )
               })}
@@ -967,16 +954,18 @@ function SchichtDialog({
           {s.id ? "Schicht bearbeiten" : "Neue Schicht"} · {TAGE_LANG[wochentag(s.datum) - 1]}, {datumText(s.datum)}
         </h3>
         <div className="mt-4 flex gap-2">
-          {(["frueh", "spaet"] as const).map((k) => {
-            const z = schichtZeitenFuer(s.datum, einstellungen ?? {})[k]
+          {(["frueh", "spaet", "doppel"] as const).map((k) => {
+            const zz = schichtZeitenFuer(s.datum, einstellungen ?? {})
+            const z = k === "doppel" ? [zz.frueh[0], zz.spaet[1]] : zz[k]
             const an = s.beginn === z[0] && s.ende === z[1]
             return (
               <button
                 key={k}
                 onClick={() => setS({ ...s, beginn: z[0], ende: z[1] })}
-                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${an ? "border-navy bg-navy text-white" : "hover:bg-neutral-100"}`}
+                className={`flex-1 rounded-lg border px-2 py-2 text-sm font-medium ${an ? "border-navy bg-navy text-white" : "hover:bg-neutral-100"}`}
               >
-                {k === "frueh" ? "Früh" : "Spät"} <span className="text-xs font-normal opacity-80">{z[0]}–{z[1]}</span>
+                {k === "frueh" ? "Früh" : k === "spaet" ? "Spät" : "Doppel"}
+                <span className="block text-[11px] font-normal opacity-80">{z[0]}–{z[1]}</span>
               </button>
             )
           })}
