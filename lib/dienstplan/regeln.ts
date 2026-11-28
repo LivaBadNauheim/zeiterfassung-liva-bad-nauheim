@@ -149,7 +149,8 @@ export function pruefeZuweisung(
     if (s.datum === neu.datum) continue // geteilter Dienst am selben Tag
     const luecke = a >= nEnde ? a - nEnde : nStart - b
     if (luecke > 0 && luecke < RUHEZEIT_MIN) {
-      sperren.push(`Ruhezeit nur ${formatStunden(luecke)} (mind. 10 Std.) zur Schicht am ${s.datum}.`)
+      // Nur Hinweis, keine Sperre (Entscheidung der Leitung)
+      hinweise.push(`Ruhezeit nur ${formatStunden(luecke)} (empfohlen mind. 10 Std.) zur Schicht am ${s.datum}.`)
     }
   }
 
